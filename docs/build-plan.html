@@ -1,0 +1,822 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<meta name="description" content="Build plan for VectorLink Labs' form-driven Conversation Intelligence product.">
+<style>*,*::before,*::after{box-sizing:border-box}img,svg{max-width:100%}</style>
+</head>
+<body><title>Brief, Crawl, Rank</title>
+<style>
+/* ============ tokens (light only, by design) ============ */
+:root{
+  color-scheme:light;
+  --paper:#F6F7F6; --surface:#FFFFFF; --surface-2:#EEF1F0; --surface-3:#E5E9E7;
+  --ink:#15191C; --ink-2:#3E474D; --ink-3:#6E777D;
+  --line:#DCE1DF; --line-2:#C3CAC7;
+  --accent:#0E6B62; --accent-2:#0B534C; --accent-soft:#E1EFEC; --on-accent:#FFFFFF;
+  --heat-1:#AE3A0C; --heat-2:#9A660B; --heat-3:#5F6B22; --heat-4:#6E777D;
+  --good:#0E6B62; --warn:#9A660B; --stop:#AE3A0C;
+  --code-bg:#EFF2F1;
+  --shadow:0 1px 2px rgba(20,30,28,.05), 0 8px 24px -16px rgba(20,30,28,.22);
+  --serif:"Iowan Old Style","Palatino Linotype",Palatino,"Book Antiqua",Georgia,"Times New Roman",serif;
+  --mono:ui-monospace,"Cascadia Mono","Cascadia Code",Consolas,"SF Mono",Menlo,"DejaVu Sans Mono",monospace;
+}
+:root[data-theme="dark"], :root[data-theme="light"]{color-scheme:light}
+
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  margin:0; background:var(--paper); color:var(--ink);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI Variable Text","Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  font-size:16.5px; line-height:1.62; -webkit-font-smoothing:antialiased;
+}
+a{color:var(--accent-2); text-underline-offset:3px}
+:focus-visible{outline:2px solid var(--accent); outline-offset:3px; border-radius:2px}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto} *{transition:none!important}}
+
+/* ============ shell ============ */
+.shell{display:block; max-width:1220px; margin:0 auto; padding:0 clamp(18px,4vw,48px)}
+@media (min-width:1140px){.shell{display:grid; grid-template-columns:196px minmax(0,1fr); gap:56px; align-items:start}}
+nav.toc{display:none}
+@media (min-width:1140px){
+  nav.toc{display:block; position:sticky; top:0; max-height:100vh; overflow-y:auto; padding:40px 0; font-size:13px; line-height:1.45}
+  nav.toc ol{list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:6px}
+  nav.toc a{display:block; text-decoration:none; color:var(--ink-2); padding:2px 0; transition:color .15s}
+  nav.toc a:hover{color:var(--accent-2)}
+  nav.toc .grp{font-family:var(--mono); font-size:10px; letter-spacing:.14em; text-transform:uppercase; color:var(--ink-3); margin:20px 0 9px; padding-bottom:6px; border-bottom:1px solid var(--line)}
+  nav.toc .grp:first-child{margin-top:0}
+}
+main{min-width:0; padding-bottom:96px}
+
+/* ============ masthead ============ */
+header.mast{padding:clamp(44px,8vh,92px) 0 0; border-bottom:1px solid var(--line)}
+.eyebrow{font-family:var(--mono); font-size:11.5px; letter-spacing:.16em; text-transform:uppercase; color:var(--accent-2); margin:0 0 20px; display:flex; flex-wrap:wrap; gap:10px; align-items:center}
+.eyebrow i{font-style:normal; color:var(--line-2)}
+.eyebrow em{font-style:normal; color:var(--ink-3)}
+h1.title{font-family:var(--serif); font-weight:400; font-size:clamp(36px,6.2vw,64px); line-height:1.05; letter-spacing:-.022em; margin:0; text-wrap:balance}
+h1.title b{font-weight:400; font-style:italic; color:var(--accent-2)}
+.deck{font-family:var(--serif); font-size:clamp(18px,2.1vw,22px); line-height:1.5; color:var(--ink-2); max-width:36em; margin:22px 0 34px}
+.mast-meta{display:flex; flex-wrap:wrap; gap:0; border-top:1px solid var(--line)}
+.mast-meta div{flex:1 1 160px; padding:16px 20px 18px 0; border-right:1px solid var(--line)}
+.mast-meta div:last-child{border-right:0}
+.mast-meta dt{font-family:var(--mono); font-size:10px; letter-spacing:.13em; text-transform:uppercase; color:var(--ink-3); margin:0 0 5px}
+.mast-meta dd{margin:0; font-size:14.5px}
+
+/* ============ sections ============ */
+section{padding:54px 0 6px; scroll-margin-top:24px}
+.sec-head{margin:0 0 24px}
+.kicker{font-family:var(--mono); font-size:10.5px; letter-spacing:.16em; text-transform:uppercase; color:var(--accent); margin:0 0 10px}
+h2{font-family:var(--serif); font-weight:400; font-size:clamp(26px,3.4vw,35px); line-height:1.15; letter-spacing:-.015em; margin:0; text-wrap:balance}
+h3{font-size:15px; font-weight:650; margin:36px 0 12px}
+h3.mono{font-family:var(--mono); font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--ink-3); font-weight:500; border-bottom:1px solid var(--line); padding-bottom:8px; margin-top:40px}
+p{margin:0 0 18px; max-width:66ch}
+p.lead{font-size:18.5px; color:var(--ink-2); max-width:60ch}
+li{margin:0 0 8px; max-width:64ch}
+strong{font-weight:650}
+code{font-family:var(--mono); font-size:.87em; background:var(--code-bg); padding:.14em .38em; border-radius:3px; border:1px solid var(--line)}
+hr.rule{border:0; border-top:1px solid var(--line); margin:46px 0 0}
+
+.quote{font-family:var(--serif); font-size:clamp(19px,2.5vw,26px); line-height:1.34; letter-spacing:-.012em; margin:28px 0; padding:0 0 0 22px; border-left:2px solid var(--accent); max-width:26em}
+.note{display:flex; gap:14px; background:var(--surface); border:1px solid var(--line); border-left:3px solid var(--heat-2); border-radius:4px; padding:16px 18px; margin:26px 0; font-size:15px; color:var(--ink-2); max-width:72ch}
+.note.ok{border-left-color:var(--accent)}
+.note .tag{font-family:var(--mono); font-size:10px; letter-spacing:.12em; text-transform:uppercase; color:var(--heat-2); flex:none; padding-top:3px; width:78px}
+.note.ok .tag{color:var(--accent-2)}
+.note p{margin:0 0 10px; max-width:none}
+.note p:last-child{margin:0}
+
+/* ============ tables ============ */
+.tw{overflow-x:auto; margin:26px 0}
+table{border-collapse:collapse; width:100%; font-size:14.5px; min-width:520px}
+th,td{text-align:left; padding:12px 14px; border-bottom:1px solid var(--line); vertical-align:top}
+th{font-family:var(--mono); font-size:10px; letter-spacing:.12em; text-transform:uppercase; color:var(--ink-3); font-weight:500; border-bottom:1px solid var(--line-2); white-space:nowrap}
+td:first-child{font-weight:600}
+tbody tr:last-child td{border-bottom:0}
+td .m{font-family:var(--mono); font-size:13px; color:var(--ink-2)}
+.num{font-family:var(--mono); font-variant-numeric:tabular-nums; text-align:right; white-space:nowrap}
+th.num{text-align:right}
+
+/* ============ change table ============ */
+.was{color:var(--ink-3); text-decoration:line-through; text-decoration-color:var(--line-2)}
+.now{color:var(--accent-2); font-weight:650}
+
+/* ============ step flow ============ */
+.figure{margin:30px 0 34px}
+.frame{background:var(--surface); border:1px solid var(--line); border-radius:6px; padding:clamp(18px,3.2vw,32px) clamp(14px,3vw,26px); overflow-x:auto; box-shadow:var(--shadow)}
+figcaption{font-family:var(--mono); font-size:11px; letter-spacing:.1em; text-transform:uppercase; color:var(--ink-3); margin:12px 0 0; display:flex; gap:10px}
+figcaption b{color:var(--accent-2); font-weight:500; flex:none}
+
+.steps{display:flex; flex-direction:column; gap:0; counter-reset:s}
+.step{display:grid; grid-template-columns:38px minmax(0,1fr); gap:16px; padding:0 0 22px; position:relative}
+.step:last-child{padding-bottom:0}
+.step::before{content:""; position:absolute; left:18px; top:34px; bottom:0; width:1px; background:var(--line-2)}
+.step:last-child::before{display:none}
+.step .n{
+  counter-increment:s; grid-column:1; width:37px; height:37px; border-radius:50%;
+  background:var(--surface-2); border:1px solid var(--line-2); display:flex; align-items:center;
+  justify-content:center; font-family:var(--mono); font-size:14px; font-weight:600; color:var(--ink-2);
+  position:relative; z-index:1;
+}
+.step .n::after{content:counter(s)}
+.step.hl .n{background:var(--accent); border-color:var(--accent); color:var(--on-accent)}
+.step .b{grid-column:2; padding-top:5px; min-width:0}
+.step h4{margin:0 0 6px; font-size:16.5px; font-weight:650; line-height:1.3}
+.step p{margin:0; font-size:15px; color:var(--ink-2); max-width:62ch}
+.step .meta{font-family:var(--mono); font-size:11.5px; color:var(--ink-3); margin-top:8px; display:flex; flex-wrap:wrap; gap:6px 14px}
+.step .meta b{color:var(--accent-2); font-weight:500}
+
+/* ============ funnel ============ */
+.funnel{display:flex; flex-direction:column; gap:5px; margin:6px 0}
+.frow{display:grid; grid-template-columns:minmax(90px,150px) minmax(0,1fr) 74px; gap:14px; align-items:center}
+.frow .l{font-size:14px; color:var(--ink-2)}
+.frow .bar{height:30px; background:var(--surface-2); border-radius:3px; overflow:hidden; display:flex; align-items:center}
+.frow .bar i{display:block; height:100%; background:var(--accent-soft); border-right:2px solid var(--accent)}
+.frow .v{font-family:var(--mono); font-size:15px; font-weight:600; font-variant-numeric:tabular-nums; text-align:right}
+.frow.dim .bar i{background:var(--surface-3); border-right-color:var(--line-2)}
+.frow.dim .v{color:var(--ink-3)}
+
+/* ============ form mock ============ */
+.mock{background:var(--surface); border:1px solid var(--line); border-radius:8px; overflow:hidden; box-shadow:var(--shadow); margin:28px 0}
+.mock-bar{display:flex; align-items:center; gap:9px; padding:11px 16px; background:var(--surface-2); border-bottom:1px solid var(--line); font-size:12.5px; font-weight:600; color:var(--ink-2)}
+.mock-bar .dots{display:flex; gap:5px}
+.mock-bar .dots i{width:8px; height:8px; border-radius:50%; background:var(--line-2); display:block}
+.mock-body{padding:clamp(18px,3vw,26px); display:flex; flex-direction:column; gap:20px}
+.fld{display:flex; flex-direction:column; gap:7px}
+.fld label{font-size:12.5px; font-weight:650; color:var(--ink-2)}
+.fld .hint{font-size:12.5px; color:var(--ink-3); line-height:1.45}
+.inp{border:1px solid var(--line-2); border-radius:5px; background:var(--paper); padding:11px 13px; font-size:15px; line-height:1.45}
+.inp.sel{display:flex; justify-content:space-between; align-items:center; color:var(--ink)}
+.inp.sel::after{content:"⌄"; color:var(--ink-3); font-size:15px; line-height:0; padding-bottom:5px}
+.chips{display:flex; flex-wrap:wrap; gap:7px}
+.chip{font-size:13px; padding:5px 11px; border:1px solid var(--line-2); border-radius:99px; background:var(--surface-2); color:var(--ink-2)}
+.chip.on{color:var(--accent-2); border-color:var(--accent); background:var(--accent-soft); font-weight:600}
+.chip.off{color:var(--ink-3); border-style:dashed}
+.chip.ai{color:var(--heat-2); border-color:var(--heat-2); background:#FBF5E6}
+.seg{display:flex; border:1px solid var(--line-2); border-radius:5px; overflow:hidden; width:fit-content}
+.seg span{padding:8px 15px; font-size:13.5px; border-right:1px solid var(--line-2); color:var(--ink-2)}
+.seg span:last-child{border-right:0}
+.seg span.on{background:var(--accent); color:var(--on-accent); font-weight:600}
+.btn{font:inherit; font-size:14px; font-weight:650; padding:11px 26px; border-radius:5px; border:1px solid var(--accent); background:var(--accent); color:var(--on-accent); width:fit-content}
+
+/* ============ result card ============ */
+.card{border:1px solid var(--line); border-radius:6px; background:var(--paper); overflow:hidden; margin:24px 0}
+.card-top{display:flex; align-items:flex-start; gap:16px; padding:16px 18px 14px}
+.score{flex:none; width:62px; text-align:center; border-right:1px solid var(--line); padding-right:14px}
+.score .v{font-family:var(--mono); font-size:26px; font-weight:600; line-height:1; color:var(--heat-1); font-variant-numeric:tabular-nums}
+.score .d{font-family:var(--mono); font-size:9.5px; color:var(--ink-3); letter-spacing:.1em; margin-top:6px; text-transform:uppercase}
+.card-top h4{font-family:var(--serif); font-weight:400; font-size:19px; line-height:1.32; margin:0 0 8px}
+.src{font-family:var(--mono); font-size:11px; color:var(--ink-3); display:flex; gap:8px; flex-wrap:wrap}
+.src i{color:var(--line-2); font-style:normal}
+.facts{display:grid; gap:1px; background:var(--line); border-top:1px solid var(--line); grid-template-columns:1fr}
+@media (min-width:640px){.facts{grid-template-columns:repeat(3,1fr)}}
+.facts div{background:var(--paper); padding:12px 18px}
+.facts dt{font-family:var(--mono); font-size:9.5px; letter-spacing:.12em; text-transform:uppercase; color:var(--ink-3); margin:0 0 5px}
+.facts dd{margin:0; font-size:14px; line-height:1.4}
+.facts dd.big{font-family:var(--mono); font-size:16px; font-weight:600; color:var(--accent-2)}
+.why{padding:14px 18px; border-top:1px solid var(--line); font-size:14.5px; color:var(--ink-2); background:var(--surface-2)}
+.why b{font-family:var(--mono); font-size:9.5px; letter-spacing:.12em; text-transform:uppercase; color:var(--ink-3); display:block; margin-bottom:5px; font-weight:500}
+.actions{display:flex; flex-wrap:wrap; gap:8px; padding:14px 18px; border-top:1px solid var(--line)}
+.act{font-family:var(--mono); font-size:11.5px; padding:6px 12px; border:1px solid var(--line-2); border-radius:4px; color:var(--ink-2); background:var(--surface)}
+.act.pri{border-color:var(--accent); color:var(--accent-2); background:var(--accent-soft)}
+
+/* ============ scoring ============ */
+.weights{display:flex; flex-direction:column; margin:22px 0}
+.wrow{display:grid; grid-template-columns:52px minmax(0,1fr) minmax(90px,240px); gap:14px; align-items:center; padding:9px 0; border-bottom:1px solid var(--line)}
+.wrow:last-child{border-bottom:0}
+.wrow .p{font-family:var(--mono); font-size:14px; font-weight:600; font-variant-numeric:tabular-nums}
+.wrow .n{font-size:15px}
+.wrow .n em{font-style:normal; color:var(--ink-3); font-size:13px; display:block; line-height:1.35; margin-top:1px}
+.wrow .bar{height:8px; background:var(--surface-3); border-radius:2px; overflow:hidden}
+.wrow .bar i{display:block; height:100%; background:var(--accent)}
+.bands{display:grid; gap:10px; grid-template-columns:1fr; margin:24px 0}
+@media (min-width:620px){.bands{grid-template-columns:repeat(4,1fr)}}
+.band{border:1px solid var(--line); border-radius:5px; background:var(--surface); padding:13px 15px; border-top-width:3px}
+.band .r{font-family:var(--mono); font-size:15px; font-weight:600; font-variant-numeric:tabular-nums}
+.band .l{font-size:12.5px; color:var(--ink-3); margin-top:4px; font-family:var(--mono); letter-spacing:.08em; text-transform:uppercase}
+.b1{border-top-color:var(--heat-1)} .b1 .r{color:var(--heat-1)}
+.b2{border-top-color:var(--heat-2)} .b2 .r{color:var(--heat-2)}
+.b3{border-top-color:var(--heat-3)} .b3 .r{color:var(--heat-3)}
+.b4{border-top-color:var(--heat-4)} .b4 .r{color:var(--heat-4)}
+
+/* ============ phases ============ */
+.phases{display:grid; gap:16px; grid-template-columns:1fr; margin:26px 0}
+@media (min-width:900px){.phases{grid-template-columns:repeat(3,1fr)}}
+.phase{background:var(--surface); border:1px solid var(--line); border-radius:6px; overflow:hidden; display:flex; flex-direction:column}
+.phase-h{padding:16px 18px 15px; border-bottom:1px solid var(--line); background:var(--surface-2)}
+.phase-h .p{font-family:var(--mono); font-size:10px; letter-spacing:.14em; text-transform:uppercase; color:var(--ink-3)}
+.phase-h h4{font-family:var(--serif); font-weight:400; font-size:21px; margin:6px 0 0}
+.phase-h .g{font-size:13.5px; color:var(--ink-3); margin-top:7px; line-height:1.45}
+.phase ul{list-style:none; margin:0; padding:12px 18px 18px}
+.phase li{font-size:14px; padding:6px 0 6px 22px; position:relative; margin:0; color:var(--ink-2); border-bottom:1px solid var(--line); max-width:none}
+.phase li:last-child{border-bottom:0}
+.phase li::before{content:""; position:absolute; left:2px; top:14px; width:7px; height:7px; border-radius:1px; border:1.5px solid var(--line-2)}
+.p1 .phase-h{border-bottom-color:var(--accent)}
+.p1 li::before{border-color:var(--accent); background:var(--accent)}
+
+/* ============ stack ============ */
+.stack{display:grid; gap:1px; background:var(--line); border:1px solid var(--line); border-radius:6px; overflow:hidden; margin:24px 0}
+@media (min-width:760px){.stack{grid-template-columns:repeat(2,1fr)}}
+.slot{background:var(--surface); padding:16px 18px}
+.slot .k{font-family:var(--mono); font-size:10px; letter-spacing:.13em; text-transform:uppercase; color:var(--ink-3); margin:0 0 10px}
+.slot .v{display:flex; flex-wrap:wrap; gap:6px}
+.slot .v span{font-size:13.5px; font-weight:550; padding:4px 10px; border-radius:4px; background:var(--surface-2); border:1px solid var(--line)}
+.slot .hint{font-size:12.5px; color:var(--ink-3); margin:9px 0 0; line-height:1.45}
+.nope{display:flex; flex-direction:column; gap:1px; background:var(--line); border:1px solid var(--line); border-radius:6px; overflow:hidden; margin:24px 0}
+.nope > div{background:var(--surface); padding:15px 18px; display:grid; grid-template-columns:minmax(96px,140px) minmax(0,1fr); gap:16px; align-items:start}
+.nope .t{font-family:var(--mono); font-size:13px; font-weight:600; color:var(--stop); text-decoration:line-through; text-decoration-color:var(--line-2)}
+.nope .r{font-size:14.5px; color:var(--ink-2)}
+.nope .r b{color:var(--ink); font-weight:650}
+
+/* ============ milestones ============ */
+.miles{display:flex; flex-direction:column; gap:1px; background:var(--line); border:1px solid var(--line); border-radius:6px; overflow:hidden; margin:24px 0}
+.mile{background:var(--surface); padding:16px 18px; display:grid; grid-template-columns:64px minmax(0,1fr); gap:16px}
+.mile .w{font-family:var(--mono); font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--accent-2); padding-top:3px}
+.mile h4{margin:0 0 5px; font-size:15.5px; font-weight:650}
+.mile p{margin:0; font-size:14px; color:var(--ink-2); max-width:60ch}
+.mile .demo{font-size:13.5px; color:var(--ink-3); margin-top:7px; font-style:italic}
+
+/* ============ metrics ============ */
+.mgrid{display:grid; gap:14px; grid-template-columns:1fr; margin:24px 0}
+@media (min-width:820px){.mgrid{grid-template-columns:repeat(3,1fr)}}
+.mcard{background:var(--surface); border:1px solid var(--line); border-radius:6px; padding:16px 18px; border-top:3px solid var(--line-2)}
+.mcard.m1{border-top-color:var(--accent)}
+.mcard.m2{border-top-color:var(--heat-2)}
+.mcard.m3{border-top-color:var(--heat-1)}
+.mcard .k{font-family:var(--mono); font-size:10px; letter-spacing:.13em; text-transform:uppercase; color:var(--ink-3); margin:0 0 10px}
+.mcard h4{margin:0 0 8px; font-size:16px; font-weight:650}
+.mcard p{font-size:14px; color:var(--ink-2); margin:0 0 12px; max-width:none}
+.mcard ul{margin:0; padding-left:0; list-style:none}
+.mcard li{font-size:13.5px; color:var(--ink-2); padding:5px 0; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; gap:12px; max-width:none}
+.mcard li:last-child{border-bottom:0}
+.mcard li b{font-family:var(--mono); font-size:13px; color:var(--accent-2); font-weight:600; white-space:nowrap}
+
+footer{border-top:1px solid var(--line); margin-top:56px; padding-top:22px; font-family:var(--mono); font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink-3); display:flex; flex-wrap:wrap; gap:8px 18px}
+</style>
+
+<div class="shell">
+
+<nav class="toc" aria-label="Contents">
+  <p class="grp">The plan</p>
+  <ol>
+    <li><a href="#what">What we're building</a></li>
+    <li><a href="#changed">What changed</a></li>
+    <li><a href="#form">The form</a></li>
+    <li><a href="#steps">The eight steps</a></li>
+    <li><a href="#ideas">Three key ideas</a></li>
+    <li><a href="#score">How we score</a></li>
+    <li><a href="#reply">Drafting a reply</a></li>
+  </ol>
+  <p class="grp">Delivery</p>
+  <ol>
+    <li><a href="#features">Features by phase</a></li>
+    <li><a href="#stack">Tech stack</a></li>
+    <li><a href="#order">Build order</a></li>
+    <li><a href="#measure">Measuring success</a></li>
+    <li><a href="#cost">What it costs</a></li>
+    <li><a href="#limits">Honest limits</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<header class="mast">
+  <p class="eyebrow">Build plan <i>/</i> <em>VectorLink Labs</em> <i>/</i> <em>Conversation Intelligence</em></p>
+  <h1 class="title">Fill a short form.<br><b>Get ranked leads.</b></h1>
+  <p class="deck">A marketer describes what they're looking for, picks a few keywords and sources, and presses Start. The system searches public developer discussions, ranks every result by how good an opportunity it is, and shows the evidence behind each score.</p>
+  <dl class="mast-meta">
+    <div><dt>Interface</dt><dd>A form, not a chatbot</dd></div>
+    <div><dt>Sources at launch</dt><dd>GitHub &amp; Hacker News</dd></div>
+    <div><dt>Backend</dt><dd>Plain Python + FastAPI</dd></div>
+    <div><dt>First working version</dt><dd>6&ndash;8 weeks</dd></div>
+  </dl>
+</header>
+
+<!-- ══════════ WHAT ══════════ -->
+<section id="what">
+  <div class="sec-head"><p class="kicker">The idea</p><h2>What we're building</h2></div>
+  <p class="lead">A tool that finds real conversations where someone has the problem our product solves &mdash; and tells us which ones are worth replying to.</p>
+  <p>Today, finding these conversations means someone manually searching GitHub and Hacker News, reading dozens of threads, and guessing which are worth the effort. That takes hours and most of it is wasted on results that turn out to be irrelevant.</p>
+  <p>This tool does the searching and the reading. A marketer fills in a short form describing what they want. The system searches the sources, sorts everything by how strong an opportunity it is, and for the best results explains <em>what the person's problem is</em>, <em>whether they're actively looking for a solution</em>, and <em>how well our product fits</em>. Every result links back to the original post, so nothing has to be taken on trust.</p>
+  <p class="quote">The output isn't 500 links. It's 20 ranked conversations with a reason attached to each one.</p>
+  <hr class="rule">
+</section>
+
+<!-- ══════════ CHANGED ══════════ -->
+<section id="changed">
+  <div class="sec-head"><p class="kicker">Since the first draft</p><h2>What changed, and why</h2></div>
+  <p>Four decisions changed the shape of the product. All four make it simpler to build and easier to explain.</p>
+
+  <div class="tw">
+    <table>
+      <thead><tr><th>Area</th><th>First draft</th><th>Now</th><th>Why it's better</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>Interface</td>
+          <td class="was">Chatbot</td>
+          <td class="now">A form</td>
+          <td>A saved form can be re-run automatically every night and show only what's new. A chat message can't. This is the single biggest gain.</td>
+        </tr>
+        <tr>
+          <td>Workflow engine</td>
+          <td class="was">LangGraph</td>
+          <td class="now">Plain Python</td>
+          <td>The steps run in a fixed order that never changes. A framework for branching logic adds nothing when there's no branching.</td>
+        </tr>
+        <tr>
+          <td>Tool protocol</td>
+          <td class="was">MCP</td>
+          <td class="now">Direct API calls</td>
+          <td>MCP lets an AI assistant discover and call tools. Nothing here needs discovering &mdash; our code calls GitHub and Hacker News directly.</td>
+        </tr>
+        <tr>
+          <td>The promise</td>
+          <td class="was">"We crawl the internet"</td>
+          <td class="now">"Connected public sources"</td>
+          <td>Accurate, legally safer, and it lets us add sources over time without changing the story.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note ok">
+    <span class="tag">In short</span>
+    <div><p>Less software to build, less to maintain, and a product that does something the chatbot version couldn't: <strong>watch the market continuously instead of answering one question at a time.</strong></p></div>
+  </div>
+  <hr class="rule">
+</section>
+
+<!-- ══════════ FORM ══════════ -->
+<section id="form">
+  <div class="sec-head"><p class="kicker">Step one</p><h2>What the user fills in</h2></div>
+  <p>Five fields. Everything else has a sensible default and stays hidden until someone asks for it.</p>
+
+  <div class="mock">
+    <div class="mock-bar"><span class="dots"><i></i><i></i><i></i></span> New search</div>
+    <div class="mock-body">
+      <div class="fld">
+        <label>Which product is this for?</label>
+        <div class="inp sel">Coalent</div>
+        <p class="hint">Used to judge how well each conversation fits what we sell.</p>
+      </div>
+      <div class="fld">
+        <label>What are you looking for?</label>
+        <div class="inp">Developers whose search index goes stale after their documents change</div>
+        <p class="hint">Plain English. This is what finds posts that describe the problem in different words.</p>
+      </div>
+      <div class="fld">
+        <label>Keywords</label>
+        <div class="chips">
+          <span class="chip on">RAG</span><span class="chip on">stale embeddings</span>
+          <span class="chip on">reindex</span><span class="chip on">token cost</span>
+          <span class="chip off">+ add</span>
+        </div>
+      </div>
+      <div class="fld">
+        <label>Where to search</label>
+        <div class="chips">
+          <span class="chip on">GitHub issues</span><span class="chip on">Hacker News</span>
+          <span class="chip off">Reddit &mdash; needs an agreement</span>
+        </div>
+      </div>
+      <div class="fld">
+        <label>How far back</label>
+        <div class="seg"><span>7 days</span><span class="on">30 days</span><span>90 days</span><span>Custom</span></div>
+      </div>
+      <button class="btn" type="button" tabindex="-1" aria-hidden="true">Start search</button>
+    </div>
+  </div>
+
+  <div class="note">
+    <span class="tag">Important</span>
+    <div><p><strong>The description field has to stay required.</strong> Keywords alone turn the tool into a word-matcher, and it will miss the person who wrote <em>"my LLM bill exploded because I resend the whole document history every time"</em> &mdash; a perfect lead that contains none of our keywords. The description is what catches those.</p></div>
+  </div>
+  <hr class="rule">
+</section>
+
+<!-- ══════════ STEPS ══════════ -->
+<section id="steps">
+  <div class="sec-head"><p class="kicker">Step two</p><h2>What happens when they press Start</h2></div>
+  <p>Eight steps, roughly 60&ndash;90 seconds for a first-time search. Results appear as they're ready rather than all at the end, so the best result is usually on screen within a few seconds.</p>
+
+  <div class="figure">
+    <div class="frame">
+      <div class="steps">
+
+        <div class="step hl">
+          <div class="n"></div>
+          <div class="b">
+            <h4>Expand the keywords &mdash; and show the user</h4>
+            <p>An AI pass turns four keywords into fifteen, including the phrases frustrated people actually type. The user sees every added word, with a reason, and can delete any of them before anything starts.</p>
+            <p class="meta"><span><b>~2s</b></span><span>1 AI call</span><span>User can edit</span></p>
+          </div>
+        </div>
+
+        <div class="step">
+          <div class="n"></div>
+          <div class="b">
+            <h4>Search the sources</h4>
+            <p>We call the official GitHub and Hacker News search APIs with the expanded keywords, plus a few "pools" &mdash; every recent issue in the handful of repositories where our buyers live.</p>
+            <p class="meta"><span><b>~60s</b></span><span>~40 API calls</span><span>~2,000 posts</span></p>
+          </div>
+        </div>
+
+        <div class="step">
+          <div class="n"></div>
+          <div class="b">
+            <h4>Clean up and remove duplicates</h4>
+            <p>Same post found twice, cross-posted issues, bot comments, wrong language, outside the date range &mdash; all dropped. We keep every post we've ever fetched, so tomorrow's search starts ahead.</p>
+            <p class="meta"><span><b>~1s</b></span><span>2,000 &rarr; 1,200</span></p>
+          </div>
+        </div>
+
+        <div class="step">
+          <div class="n"></div>
+          <div class="b">
+            <h4>Search our own copy, two ways at once</h4>
+            <p>One search matches exact words. The other matches <em>meaning</em>, so a post that never says "RAG" still surfaces if it describes the same problem. The two lists are merged.</p>
+            <p class="meta"><span><b>&lt;1s</b></span><span>1,200 &rarr; 300</span></p>
+          </div>
+        </div>
+
+        <div class="step hl">
+          <div class="n"></div>
+          <div class="b">
+            <h4>Re-sort by how well each one actually matches</h4>
+            <p>A specialist model reads the search request and each post together and scores the fit. This is cheap and fast, and it exists to throw away the 240 posts that don't deserve expensive attention.</p>
+            <p class="meta"><span><b>~1s</b></span><span>300 &rarr; 60</span><span><b>half a cent</b></span></p>
+          </div>
+        </div>
+
+        <div class="step hl">
+          <div class="n"></div>
+          <div class="b">
+            <h4>Read the survivors properly</h4>
+            <p>Only now does an AI actually read each post and pull out: what the problem is, whether the person is actively looking for a solution, how frustrated they are, and how well our product fits &mdash; each backed by a quote from the post itself.</p>
+            <p class="meta"><span><b>~10s</b></span><span>Top 25 only</span><span><b>~20 cents</b></span></p>
+          </div>
+        </div>
+
+        <div class="step">
+          <div class="n"></div>
+          <div class="b">
+            <h4>Score and rank</h4>
+            <p>Six signals combine into one score out of 100. Anything that isn't genuinely relevant is pushed into a collapsed "weak matches" section rather than padding the list.</p>
+            <p class="meta"><span><b>instant</b></span><span>25 &rarr; 20 shown</span></p>
+          </div>
+        </div>
+
+        <div class="step">
+          <div class="n"></div>
+          <div class="b">
+            <h4>Show the results</h4>
+            <p>Ranked list, each with its score, the person's problem, the evidence quote, and a link to the original. The user picks the ones worth acting on.</p>
+            <p class="meta"><span>Saved permanently</span><span>Exportable</span></p>
+          </div>
+        </div>
+
+      </div>
+    </div>
+    <figcaption><b>Fig. 1</b> One search, start to finish</figcaption>
+  </div>
+
+  <h3 class="mono">Why the funnel narrows this way</h3>
+  <p>Each step is cheaper per item than the next, so each one's job is to protect the step after it. Reading all 2,000 posts with AI would cost about <strong>$20 and take 20 minutes</strong>. Reading the right 25 costs about <strong>20 cents and takes 10 seconds</strong>, and the answer is the same.</p>
+
+  <div class="figure">
+    <div class="frame">
+      <div class="funnel">
+        <div class="frow"><span class="l">Fetched</span><span class="bar"><i style="width:100%"></i></span><span class="v">2,000</span></div>
+        <div class="frow"><span class="l">After cleanup</span><span class="bar"><i style="width:60%"></i></span><span class="v">1,200</span></div>
+        <div class="frow"><span class="l">Best matches</span><span class="bar"><i style="width:15%"></i></span><span class="v">300</span></div>
+        <div class="frow"><span class="l">Re-sorted</span><span class="bar"><i style="width:3%"></i></span><span class="v">60</span></div>
+        <div class="frow"><span class="l">Read by AI</span><span class="bar"><i style="width:1.25%"></i></span><span class="v">25</span></div>
+        <div class="frow"><span class="l">Shown</span><span class="bar"><i style="width:1%"></i></span><span class="v">20</span></div>
+      </div>
+    </div>
+    <figcaption><b>Fig. 2</b> 2,000 in, 20 out &mdash; and only 25 are ever read by AI</figcaption>
+  </div>
+  <hr class="rule">
+</section>
+
+<!-- ══════════ IDEAS ══════════ -->
+<section id="ideas">
+  <div class="sec-head"><p class="kicker">The difficult parts</p><h2>Three ideas that make it work</h2></div>
+  <p>Most of this system is ordinary software. Three things are where the product is won or lost.</p>
+
+  <h3>1. Show the expanded keywords before spending anything</h3>
+  <p>The user types four keywords. We turn them into fifteen. If we do that silently and the expansion is wrong, they get bad results and blame the product. So we show them the expanded list, mark which words came from them and which from the AI, and let them delete anything they don't like &mdash; alongside a live estimate of how many results they're likely to get.</p>
+  <p>We also show three or four <strong>example posts</strong> the system is looking for &mdash; written out in full. Nobody can review a search algorithm, but anyone can read <em>"I updated a document and my search still returns the old version. Do I have to rebuild everything?"</em> and say "yes, that's exactly it" or "no, that's not what I meant." It takes fifteen seconds and it's the difference between a trusted tool and a black box.</p>
+
+  <h3>2. Search wide, not just for the keywords</h3>
+  <p>This is easy to get wrong and expensive to fix later. Meaning-based search can only re-sort posts we already downloaded. If we only download posts containing our keywords, the post that describes the problem in completely different words was never downloaded, and no amount of clever ranking will find it.</p>
+  <p>So the crawl itself has to cast a wider net: the expanded phrases, plus whole <em>pools</em> of posts &mdash; every recent issue in the five or six repositories where our buyers already are. In a pool like that, every post is a candidate and no keyword is needed at all.</p>
+
+  <h3>3. Sort cheaply first, think expensively later</h3>
+  <p>The order of steps 5 and 6 is the difference between a 20-cent search and a $2.40 search for identical results. Sort first with the cheap specialist model, then let the expensive AI read only what survived. Getting this backwards is the most common way a system like this becomes too expensive to run.</p>
+  <hr class="rule">
+</section>
+
+<!-- ══════════ SCORE ══════════ -->
+<section id="score">
+  <div class="sec-head"><p class="kicker">The number</p><h2>How results are scored</h2></div>
+  <p>Every result gets one score out of 100, built from six signals:</p>
+
+  <div class="weights">
+    <div class="wrow"><span class="p">35%</span><span class="n">Are they actively looking?<em>Asking for a solution beats just complaining</em></span><span class="bar"><i style="width:100%"></i></span></div>
+    <div class="wrow"><span class="p">20%</span><span class="n">How bad is the problem<em>Costing real money beats mild annoyance</em></span><span class="bar"><i style="width:57%"></i></span></div>
+    <div class="wrow"><span class="p">15%</span><span class="n">Are they the right kind of person<em>A developer in a relevant project, not a bot</em></span><span class="bar"><i style="width:43%"></i></span></div>
+    <div class="wrow"><span class="p">15%</span><span class="n">How recent<em>A live thread beats a dead one</em></span><span class="bar"><i style="width:43%"></i></span></div>
+    <div class="wrow"><span class="p">15%</span><span class="n">How much attention it has<em>Enough eyes to matter, not so many we'd be buried</em></span><span class="bar"><i style="width:43%"></i></span></div>
+  </div>
+
+  <div class="note">
+    <span class="tag">Fix</span>
+    <div>
+      <p><strong>Relevance is not one of the six &mdash; it's a gate.</strong> In the first draft, relevance was worth 30% and the other five were worth 70%. That means a wildly irrelevant post that happened to be popular and recent scored <strong>67 out of 100</strong> &mdash; the same band as a perfect match. Users judge the whole tool by the worst thing on the first page, so this one detail would have sunk it.</p>
+      <p>Now relevance multiplies everything else. That same junk post scores <strong>1</strong>. A genuinely relevant older post that used to score 72 now scores 57 and sits correctly above it.</p>
+    </div>
+  </div>
+
+  <div class="bands">
+    <div class="band b1"><div class="r">75&ndash;100</div><div class="l">Very high</div></div>
+    <div class="band b2"><div class="r">55&ndash;74</div><div class="l">High</div></div>
+    <div class="band b3"><div class="r">32&ndash;54</div><div class="l">Medium</div></div>
+    <div class="band b4"><div class="r">Below 32</div><div class="l">Weak</div></div>
+  </div>
+
+  <h3 class="mono">What one result looks like</h3>
+  <div class="card">
+    <div class="card-top">
+      <div class="score"><div class="v">86</div><div class="d">score</div></div>
+      <div>
+        <h4>&ldquo;We re-send the whole doc history on every request and our bill went 4&times;&rdquo;</h4>
+        <p class="src">Hacker News <i>&middot;</i> 2 days ago <i>&middot;</i> 41 points <i>&middot;</i> 12 replies</p>
+      </div>
+    </div>
+    <dl class="facts">
+      <div><dt>Their problem</dt><dd>Repeated context is inflating token cost</dd></div>
+      <div><dt>Product fit</dt><dd class="big">94%</dd></div>
+      <div><dt>Actively looking?</dt><dd class="big">Yes</dd></div>
+    </dl>
+    <p class="why"><b>Evidence &mdash; their words, not ours</b>&ldquo;our bill went 4x after we added history&rdquo;</p>
+    <div class="actions">
+      <span class="act pri">Open on Hacker News</span><span class="act">Why this score?</span><span class="act">Draft a reply</span><span class="act">Not useful</span>
+    </div>
+  </div>
+  <p>Every score can be opened up to show exactly which signal contributed how many points. A marketer is about to post a public comment under their own name &mdash; they will not act on a number they can't question.</p>
+  <hr class="rule">
+</section>
+
+<!-- ══════════ REPLY ══════════ -->
+<section id="reply">
+  <div class="sec-head"><p class="kicker">The last mile</p><h2>Drafting a reply</h2></div>
+  <p>When a result is worth answering, the user clicks <strong>Draft a reply</strong> and gets a suggested response: a genuinely useful answer first, and only then an optional mention of our product.</p>
+  <p>Two rules, and both are deliberate:</p>
+  <ul>
+    <li><strong>Only on click, never for every result.</strong> Drafting all 20 would add about 40 seconds to every search for drafts nobody reads. Most searches produce two or three worth answering.</li>
+    <li><strong>A person edits it and posts it themselves.</strong> The tool never posts anything anywhere. This isn't caution for its own sake &mdash; an obvious bot dropping product mentions in developer threads gets flagged fast and damages the brand we're marketing. Reddit's terms explicitly forbid using their API to spam.</li>
+  </ul>
+  <hr class="rule">
+</section>
+
+<!-- ══════════ FEATURES ══════════ -->
+<section id="features">
+  <div class="sec-head"><p class="kicker">Scope</p><h2>Features, by phase</h2></div>
+  <p>Phase 1 alone is a product someone would pay for. Everything after it is built on real usage, not guesses.</p>
+
+  <div class="phases">
+    <div class="phase p1">
+      <div class="phase-h"><p class="p">Phase 1 &middot; 6&ndash;8 weeks</p><h4>Working product</h4><p class="g">One search, start to finish, with results good enough to act on.</p></div>
+      <ul>
+        <li>The five-field form</li>
+        <li>Keyword expansion &amp; review screen</li>
+        <li>GitHub connector</li>
+        <li>Hacker News connector</li>
+        <li>Stored library of everything fetched</li>
+        <li>Word search + meaning search</li>
+        <li>Re-sorting model</li>
+        <li>AI reading: problem, intent, fit</li>
+        <li>Evidence quote on every result</li>
+        <li>Opportunity score &amp; breakdown</li>
+        <li>Live progress while searching</li>
+        <li>Saved searches</li>
+        <li>Draft a reply (on click)</li>
+        <li>Export to CSV</li>
+      </ul>
+    </div>
+    <div class="phase">
+      <div class="phase-h"><p class="p">Phase 2</p><h4>Always watching</h4><p class="g">The saved form becomes a monitor that works overnight.</p></div>
+      <ul>
+        <li>Scheduled nightly re-runs</li>
+        <li>"What's new since yesterday"</li>
+        <li>Email &amp; Slack alerts</li>
+        <li>Dashboard &amp; trends</li>
+        <li>Competitor watch template</li>
+        <li>Multiple products</li>
+        <li>Team accounts &amp; sharing</li>
+        <li>More sources (Stack Overflow, RSS)</li>
+        <li>Advanced filters</li>
+        <li>Mark as handled / assign</li>
+      </ul>
+    </div>
+    <div class="phase">
+      <div class="phase-h"><p class="p">Phase 3</p><h4>Getting smarter</h4><p class="g">Uses the data the first two phases produced.</p></div>
+      <ul>
+        <li>Ranking that learns from what users open and dismiss</li>
+        <li>Weekly automatic reports</li>
+        <li>Cross-source trend analysis</li>
+        <li>Reddit, once permitted</li>
+        <li>Custom scoring per customer</li>
+        <li>Public API</li>
+      </ul>
+    </div>
+  </div>
+  <hr class="rule">
+</section>
+
+<!-- ══════════ STACK ══════════ -->
+<section id="stack">
+  <div class="sec-head"><p class="kicker">How it's built</p><h2>Technology</h2></div>
+  <p>Deliberately boring. Everything here is something the team already knows or can learn in an afternoon.</p>
+
+  <div class="stack">
+    <div class="slot"><p class="k">What the user sees</p><div class="v"><span>React</span><span>shadcn/ui</span></div><p class="hint">Standard web front end.</p></div>
+    <div class="slot"><p class="k">The backend</p><div class="v"><span>Python</span><span>FastAPI</span><span>Pydantic</span></div><p class="hint">Plain Python functions running in a fixed order. No workflow framework.</p></div>
+    <div class="slot"><p class="k">Database &amp; search</p><div class="v"><span>PostgreSQL</span><span>pgvector</span></div><p class="hint">One database does the storage, the word search and the meaning search. No separate search product.</p></div>
+    <div class="slot"><p class="k">Background jobs</p><div class="v"><span>Redis</span><span>Dramatiq</span></div><p class="hint">Runs the search after the user presses Start, so closing the tab doesn't cancel it.</p></div>
+    <div class="slot"><p class="k">AI models</p><div class="v"><span>OpenAI</span><span>Gemini</span><span>Anthropic</span></div><p class="hint">Behind one small interface (~80 lines) so we can switch provider without touching the rest.</p></div>
+    <div class="slot"><p class="k">Hosting</p><div class="v"><span>Cloud Run</span><span>Managed Postgres</span><span>Managed Redis</span></div><p class="hint">Same cloud setup we already use elsewhere.</p></div>
+  </div>
+
+  <h3 class="mono">What we're deliberately not using</h3>
+  <div class="nope">
+    <div>
+      <span class="t">LangGraph</span>
+      <span class="r"><b>The steps never branch.</b> A framework for building workflows where an AI decides what happens next earns its cost only when an AI actually decides something. Here the order is fixed before the search starts. Replacing it: about forty lines of ordinary Python.</span>
+    </div>
+    <div>
+      <span class="t">MCP</span>
+      <span class="r"><b>Nothing needs to discover anything.</b> MCP lets an AI assistant find and call tools it doesn't own. Our own code calls GitHub and Hacker News directly. Worth revisiting only as a future feature &mdash; letting a customer's own AI assistant query our data.</span>
+    </div>
+    <div>
+      <span class="t">LangChain</span>
+      <span class="r"><b>Same reasoning.</b> We need one small function that sends text to a model and validates what comes back. That's a short file, not a dependency.</span>
+    </div>
+    <div>
+      <span class="t">A separate search engine</span>
+      <span class="r"><b>Not yet.</b> PostgreSQL handles both kinds of search at our size. We'll add Elasticsearch or similar only if we measure a real need &mdash; and we'll know, because we'll be measuring.</span>
+    </div>
+  </div>
+  <hr class="rule">
+</section>
+
+<!-- ══════════ ORDER ══════════ -->
+<section id="order">
+  <div class="sec-head"><p class="kicker">Sequence</p><h2>Build order</h2></div>
+  <p>Every milestone ends with something demonstrable, so progress is visible from week one.</p>
+
+  <div class="miles">
+    <div class="mile">
+      <span class="w">Week 0</span>
+      <div>
+        <h4>Prove the leads exist &mdash; before writing any code</h4>
+        <p>Hand-run ten searches in a browser. Paste twenty results each into a spreadsheet. Have a marketer grade them: is this a real opportunity, yes or no?</p>
+        <p class="demo">If fewer than three per search are genuinely good, the problem is the premise, not the engineering &mdash; and we've spent two days finding out instead of two months. If it passes, we've also just built the first third of our quality benchmark.</p>
+      </div>
+    </div>
+    <div class="mile">
+      <span class="w">Week 1&ndash;2</span>
+      <div>
+        <h4>Fetch and store</h4>
+        <p>The two connectors, the database, cleanup and duplicate removal. No interface yet.</p>
+        <p class="demo">Demo: "we have 40,000 real developer conversations in a database, searchable by keyword."</p>
+      </div>
+    </div>
+    <div class="mile">
+      <span class="w">Week 3&ndash;4</span>
+      <div>
+        <h4>Search and rank</h4>
+        <p>Word search plus meaning search, merged and re-sorted. Still no interface &mdash; results checked in a script.</p>
+        <p class="demo">Demo: "here are the top 20 for this search, and here's the benchmark score proving they're the right 20."</p>
+      </div>
+    </div>
+    <div class="mile">
+      <span class="w">Week 5&ndash;6</span>
+      <div>
+        <h4>AI reading and scoring</h4>
+        <p>Problem, intent, product fit, evidence quote, and the score with its breakdown.</p>
+        <p class="demo">Demo: a full ranked result list with reasons &mdash; the first version that looks like the product.</p>
+      </div>
+    </div>
+    <div class="mile">
+      <span class="w">Week 7&ndash;8</span>
+      <div>
+        <h4>The form, live progress, saved searches</h4>
+        <p>The interface, the keyword review screen, results streaming in as they're ready, export, and reply drafting.</p>
+        <p class="demo">Demo: someone outside the team runs their own search successfully.</p>
+      </div>
+    </div>
+  </div>
+  <hr class="rule">
+</section>
+
+<!-- ══════════ MEASURE ══════════ -->
+<section id="measure">
+  <div class="sec-head"><p class="kicker">Proof</p><h2>How we'll know it's working</h2></div>
+  <p>Three separate questions. They fail independently, so we track them separately &mdash; a search that finishes in eight seconds and returns rubbish passes every speed check.</p>
+
+  <div class="mgrid">
+    <div class="mcard m1">
+      <p class="k">Question 1</p>
+      <h4>Is it fast and reliable?</h4>
+      <p>Straightforward engineering measures, on a dashboard from week one.</p>
+      <ul>
+        <li>First result on screen <b>under 8s</b></li>
+        <li>Search completes <b>under 90s</b></li>
+        <li>Searches that succeed <b>over 98%</b></li>
+        <li>Cost per search <b>under $0.35</b></li>
+      </ul>
+    </div>
+    <div class="mcard m2">
+      <p class="k">Question 2</p>
+      <h4>Are the results any good?</h4>
+      <p>Needs a benchmark: 30 real searches with their results graded by hand, once. About one day's work, and nothing improves without it.</p>
+      <ul>
+        <li>Good posts we found at all <b>95%</b></li>
+        <li>Top 10 that are useful <b>80%</b></li>
+        <li>Searches with junk in the top 5 <b>under 5%</b></li>
+      </ul>
+    </div>
+    <div class="mcard m3">
+      <p class="k">Question 3</p>
+      <h4>Is it worth anything?</h4>
+      <p>The only question that matters to the business. Measured from what users actually do.</p>
+      <ul>
+        <li>Results opened per search</li>
+        <li>Results marked "not useful"</li>
+        <li>Replies drafted</li>
+        <li><b>Replies actually posted</b></li>
+      </ul>
+    </div>
+  </div>
+
+  <p><strong>The benchmark is the part that's easy to skip and expensive to skip.</strong> Without 30 hand-graded searches, every change to the ranking is a guess, and nobody can tell an improvement from a regression. With it, every change is checked automatically before it ships &mdash; and the work is one person for one day, reusing the spreadsheet from Week 0.</p>
+  <p>The strongest single measure is the last one: <strong>replies actually posted per week</strong>. It's the only number that can't be gamed by making one part look good at another's expense.</p>
+  <hr class="rule">
+</section>
+
+<!-- ══════════ COST ══════════ -->
+<section id="cost">
+  <div class="sec-head"><p class="kicker">Running cost</p><h2>What it costs to operate</h2></div>
+  <p>AI and hosting costs, per customer. Everything below assumes today's model prices, which move &mdash; we'll re-check before publishing any pricing.</p>
+
+  <div class="tw">
+    <table>
+      <thead><tr><th>Activity</th><th class="num">Cost each</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr><td>First-time search</td><td class="num">~$0.15</td><td>Nothing cached yet</td></tr>
+        <tr><td>Repeat search, similar topic</td><td class="num">~$0.08</td><td>Much of the reading is reused</td></tr>
+        <tr><td>Nightly re-run of a saved search</td><td class="num">~$0.02</td><td>Only looks at what's new</td></tr>
+        <tr><td>One customer, one month</td><td class="num">~$9&ndash;20</td><td>40 searches plus a nightly monitor</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>The single biggest saving is storing the AI's reading of each post and reusing it. The same conversation gets read once and reused across every search and every customer &mdash; which is why a nightly monitor costs two cents instead of eleven. Hosting on top of this is small: one database, one Redis, two small containers.</p>
+  <hr class="rule">
+</section>
+
+<!-- ══════════ LIMITS ══════════ -->
+<section id="limits">
+  <div class="sec-head"><p class="kicker">Straight answers</p><h2>What we're not promising</h2></div>
+  <p>Better to say these now than to discover them in a customer demo.</p>
+
+  <div class="tw">
+    <table>
+      <thead><tr><th>Limit</th><th>What it means</th></tr></thead>
+      <tbody>
+        <tr><td>Not the whole internet</td><td>We search the sources we've connected. At launch that's GitHub and Hacker News, and we say so plainly.</td></tr>
+        <tr><td>Reddit is off the table for now</td><td>Reddit's terms require permission for commercial use of their data. It's designed in and switched off. Nothing else depends on it.</td></tr>
+        <tr><td>Sources cap how much we can see</td><td>GitHub allows 30 searches a minute and returns at most 1,000 results per query. We work within that by searching narrowly and often, and by keeping everything we fetch &mdash; but we won't claim to have seen everything.</td></tr>
+        <tr><td>A search takes about a minute</td><td>It's real work against live APIs. Results stream in as they're ready, so the best one is usually visible in a few seconds, and closing the tab doesn't cancel it.</td></tr>
+        <tr><td>The tool never posts</td><td>It drafts. A person edits and posts. That's a permanent rule, not a phase-one limitation.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note ok">
+    <span class="tag">The ask</span>
+    <div><p>Approval to start Week 0 &mdash; two days of manual searching to confirm the opportunities are really there, at no engineering cost. If it passes, the eight-week build starts immediately with a quality benchmark already in hand.</p></div>
+  </div>
+</section>
+
+<footer>
+  <span>VectorLink Labs</span><span>Conversation Intelligence</span><span>Build plan &mdash; form-driven</span>
+</footer>
+
+</main>
+</div>
+
+</body>
+</html>

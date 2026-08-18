@@ -1,0 +1,87 @@
+# Product profile template.
+#
+# Copy this file to <product-slug>.yaml and fill it in. Takes about 15 minutes.
+# This is what makes "is this a good opportunity?" answerable — without it the system
+# can only tell you a post is *about* a topic, not that the author needs what you sell.
+#
+# The version hash is computed from the marked fields ONLY. Editing anything else
+# (display name, notes) must not invalidate the analysis cache.
+
+id: my-product
+name: My Product
+one_liner: >
+  One sentence a stranger would understand. What it does, for whom.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# VERSIONED — these five fields are hashed into product_kb_version.
+# Changing any of them re-scores previously found conversations, which is correct.
+# ─────────────────────────────────────────────────────────────────────────────
+
+description: >
+  Two or three sentences. What the product actually does, mechanically.
+  Write it for an engineer, not for a landing page.
+
+problems_we_solve:
+  # The problems, stated as problems — not as features.
+  # Good: "index goes stale when source documents change"
+  # Bad:  "intelligent cache invalidation engine"
+  - problem one
+  - problem two
+  - problem three
+
+keywords:
+  # How WE describe the product. Category terms, technology names.
+  # These are the weaker of the two lists — see pain_vocabulary below.
+  - term
+  - term
+
+pain_vocabulary:
+  # THE MOST IMPORTANT FIELD IN THIS FILE.
+  #
+  # How a frustrated stranger describes the problem at 11pm, before they know your
+  # product exists. Not your words — theirs. Symptoms, complaints, failure descriptions.
+  #
+  # Nobody types "context engineering platform". They type "my index is stale" and
+  # "do I have to re-embed everything". If this list is written in marketing language
+  # the search quietly under-performs in a way that is hard to diagnose.
+  #
+  # Best sources, in order:
+  #   1. Your own repo's issues, if you have a public one
+  #   2. Support tickets and sales call notes
+  #   3. Your docs' troubleshooting and FAQ pages
+  #   4. Competitors' GitHub issues
+  #   5. Your homepage — structure only, never for this field
+  - "phrase someone types when this hurts"
+  - "another symptom, in their words"
+  - "the workaround they complain about"
+
+competitors:
+  - name: Competitor
+    aliases: [competitor-alias, CompetitorName]
+    repo: owner/repo        # optional — enables competitor-watch searches
+    notes: >
+      Optional. Why someone would be comparing you.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# NOT VERSIONED — safe to edit without invalidating cached analysis.
+# ─────────────────────────────────────────────────────────────────────────────
+
+target_repos:
+  # Repositories where your buyers already are. Every open issue in these is a
+  # candidate with no keyword needed — this is "pool-shaped" discovery and it is
+  # how you find people who never use your vocabulary at all.
+  - owner/repo
+  - owner/repo
+
+target_communities:
+  hn_tags: [ask_hn]
+
+buyer:
+  who: >
+    Who has this problem and can act on it. Used for the audience-fit signal.
+
+exclude_authors:
+  # Your own team's handles, so the tool never surfaces your own posts.
+  - your-github-handle
+
+disabled: false

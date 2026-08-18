@@ -1,0 +1,1 @@
+-- Counts per dropped predicate, for the empty results explainer.

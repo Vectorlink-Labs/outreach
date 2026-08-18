@@ -1,0 +1,1 @@
+# Local dev: postgres+pgvector, redis. Nothing else runs in docker locally.
