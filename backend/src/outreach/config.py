@@ -25,6 +25,12 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://outreach:outreach@localhost:5432/outreach"
     db_echo: bool = False
 
+    #: Create the database if it is missing and apply migrations at startup.
+    #: On for local development so a new person runs one command. Must be
+    #: OFF in production: two instances starting together would migrate at
+    #: the same time, and a bad migration should fail a deploy, not the app.
+    auto_migrate: bool = True
+
     # ---- crawling --------------------------------------------------------
     user_agent: str = "OutreachBot/0.1 (+https://vectorlinklabs.com/bot)"
     http_timeout_seconds: float = 20.0
