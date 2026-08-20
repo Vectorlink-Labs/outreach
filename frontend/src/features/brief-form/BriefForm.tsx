@@ -21,7 +21,7 @@ import Stack from "@mui/material/Stack";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 
-import { SUGGESTED_KEYWORDS } from "@/lib/mockData";
+import { useKeywordSuggestions } from "./useKeywordSuggestions";
 import type { BriefInput, DaysBack, SourceId } from "@/lib/types";
 import {
   DATE_OPTIONS,
@@ -65,6 +65,11 @@ export default function BriefForm({ submitting, onSubmit }: Props) {
   useEffect(() => {
     save(watched as Partial<BriefInput>);
   }, [watched, save]);
+
+  // Suggestions follow what they have described, rather than a list checked
+  // into the repository for one particular product.
+  const { options: keywordOptions, loading: keywordsLoading } =
+    useKeywordSuggestions((watched.description as string) ?? "");
 
   const submit = (values: FormValues) =>
     onSubmit({
@@ -143,7 +148,13 @@ export default function BriefForm({ submitting, onSubmit }: Props) {
             <Autocomplete
               multiple
               freeSolo
-              options={SUGGESTED_KEYWORDS}
+              options={keywordOptions}
+              loading={keywordsLoading}
+              noOptionsText={
+                keywordsLoading
+                  ? "Thinking of keywords…"
+                  : "Describe what you are looking for above, and suggestions appear here. You can type your own at any time."
+              }
               value={field.value}
               onChange={(_, next) => {
                 const seen = new Set<string>();

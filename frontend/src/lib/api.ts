@@ -64,7 +64,7 @@ async function json<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const httpApi: Api = {
   createBrief: (input) =>
-    json("/api/briefs", {
+    json("/api/v1/briefs", {
       method: "POST",
       body: JSON.stringify({
         product_name: input.productName,
@@ -76,37 +76,37 @@ export const httpApi: Api = {
       }),
     }),
 
-  listBriefs: () => json("/api/briefs"),
+  listBriefs: () => json("/api/v1/briefs"),
 
-  compilePlan: (briefId) => json(`/api/briefs/${briefId}/plan`, { method: "POST" }),
+  compilePlan: (briefId) => json(`/api/v1/briefs/${briefId}/plan`, { method: "POST" }),
 
-  getPlan: (planId) => json(`/api/plans/${planId}`),
+  getPlan: (planId) => json(`/api/v1/plans/${planId}`),
 
   amendPlan: (planId, terms) =>
-    json(`/api/plans/${planId}/amend`, {
+    json(`/api/v1/plans/${planId}/amend`, {
       method: "POST",
       body: JSON.stringify({ terms }),
     }),
 
-  startRun: (planId) => json(`/api/plans/${planId}/runs`, { method: "POST" }),
+  startRun: (planId) => json(`/api/v1/plans/${planId}/runs`, { method: "POST" }),
 
-  getRun: (runId) => json(`/api/runs/${runId}`),
+  getRun: (runId) => json(`/api/v1/runs/${runId}`),
 
-  getRunResults: (runId) => json(`/api/runs/${runId}/results`),
+  getRunResults: (runId) => json(`/api/v1/runs/${runId}/results`),
 
   sendFeedback: (resultId, value) =>
-    json(`/api/results/${resultId}/feedback`, {
+    json(`/api/v1/results/${resultId}/feedback`, {
       method: "POST",
       body: JSON.stringify({ useful: value === "useful" }),
     }),
 
   draftReply: (resultId, allowMention) =>
-    json(`/api/results/${resultId}/reply-draft`, {
+    json(`/api/v1/results/${resultId}/reply-draft`, {
       method: "POST",
       body: JSON.stringify({ allow_mention: allowMention }),
     }),
 
-  runEventsUrl: (runId) => `${API_BASE}/api/runs/${runId}/events`,
+  runEventsUrl: (runId) => `${API_BASE}/api/v1/runs/${runId}/events`,
 
-  exportUrl: (runId) => `${API_BASE}/api/runs/${runId}/export.csv`,
+  exportUrl: (runId) => `${API_BASE}/api/v1/runs/${runId}/export.csv`,
 };

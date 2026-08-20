@@ -35,7 +35,7 @@ Two rules follow from this, and most bugs come from breaking them:
 
 ```
 backend/     FastAPI service, workers, pipeline, evaluation harness
-frontend/    React + shadcn/ui
+frontend/    React + MUI (Material UI)
 docs/        Architecture notes and decision records — read docs/architecture/overview.md first
 infra/       Container and Cloud Run definitions
 scripts/     One-off operational scripts
@@ -108,21 +108,30 @@ same output. Do not reorder these two.
 
 ## Getting started
 
+**PostgreSQL runs natively — there is no Docker in local dev.** Full setup, including
+installing Postgres on Windows and creating the role, is in
+[backend/README.md](backend/README.md).
+
+Point `DATABASE_URL` at the `postgres` superuser your installer created, and there
+is no database setup at all — the database, its tables and every migration are
+applied on first startup. See [backend/README.md](backend/README.md) for the
+dedicated-role alternative.
+
 ```bash
-docker compose up -d           # postgres + pgvector, redis
 cd backend
-cp .env.example .env
-uv sync                        # or: pip install -e ".[dev]"
-alembic upgrade head
-python -m scripts.seed_corpus  # optional: a non-empty corpus for local dev
-uvicorn outreach.main:app --reload
+py -m venv .venv
+.venv\Scripts\python.exe -m pip install -e ".[dev]"
+copy .env.example .env
+.venv\Scripts\python.exe -m uvicorn outreach.main:app --reload
 ```
 
 ```bash
 cd frontend
 npm install
-npm run dev
+npm run dev          # runs on mock data by default — see frontend/src/lib/client.ts
 ```
+
+`pgvector` is **not** installed yet. Nothing uses it until the retrieval work starts.
 
 ---
 

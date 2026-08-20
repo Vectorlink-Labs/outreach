@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from outreach import profile as profile_reader
 from outreach.connectors.http import http_client
 from outreach.connectors.website import crawl, discover
 from outreach.connectors.website.extract import combine
@@ -163,6 +164,31 @@ async def run_crawl(product_id: uuid.UUID) -> None:
             words=product.word_count,
             truncated=product.truncated,
         )
+
+        markdown_for_profile = product.markdown
+        source_hash = product.content_hash
+        needs_profile = bool(
+            markdown_for_profile and source_hash != product.profile_source_hash
+        )
+
+    # Reading the site is separate from crawling it, and happens outside the
+    # session above so a slow model call does not hold a database connection
+    # open. A product with no profile still works; the search falls back to
+    # what the user typed.
+    if not needs_profile:
+        return
+
+    extracted = await profile_reader.extract(markdown_for_profile)
+    if extracted is None:
+        return
+
+    async with session_scope() as session:
+        product = await repo.get(session, product_id)
+        if product is None:
+            return
+        product.profile = extracted.model_dump()
+        product.profile_source_hash = source_hash
+        log.info("profile.saved", product_id=str(product_id), domain=extracted.domain)
 
 
 def is_stale(product: Product) -> bool:

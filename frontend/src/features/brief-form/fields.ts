@@ -5,7 +5,7 @@
  * backend starts publishing it, only this file is replaced.
  * ------------------------------------------------------------------ */
 
-import { DATE_OPTIONS, SOURCE_OPTIONS } from "@/lib/mockData";
+import { DATE_OPTIONS, SOURCE_OPTIONS } from "@/lib/options";
 
 export { DATE_OPTIONS, SOURCE_OPTIONS };
 
@@ -29,7 +29,7 @@ export const FIELD_COPY = {
   keywords: {
     label: "Keywords",
     placeholder: "Type a word and press Enter",
-    help: "Four are enough. The compiler expands them and shows you every term it adds before anything runs.",
+    help: "One to three words each — they are matched as exact phrases, so a whole sentence finds nothing. Suggestions appear once you have described what you are looking for.",
   },
   sources: {
     label: "Where to search",

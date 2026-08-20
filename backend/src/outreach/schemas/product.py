@@ -61,6 +61,10 @@ class ProductOut(BaseModel):
     crawl_finished_at: datetime | None
     created_at: datetime
 
+    #: What the website means, once read. None until the crawl finishes and
+    #: the extraction runs. This is the part the search actually uses.
+    profile: dict | None = None
+
 
 class ProductDetail(ProductOut):
     pages: list[ProductPageOut] = []

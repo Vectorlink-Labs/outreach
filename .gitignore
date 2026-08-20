@@ -58,9 +58,10 @@ backend/eval/output/
 backend/eval/runs/
 *.parquet
 
-# Golden set INPUTS are source and must be committed:
-#   backend/eval/golden/briefs/     ← commit
-#   backend/eval/golden/judgments/  ← commit
+# Evaluation data IS source and must be committed. labels.json is hand-made,
+# cannot be regenerated, and is the only ground truth in the repository:
+#   backend/eval/data/labels.json      ← commit
+#   backend/eval/data/candidates.json  ← commit
 
 # ── Editors & OS ──────────────────────────────────────────────────────────
 .claude/

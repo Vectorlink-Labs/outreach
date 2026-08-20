@@ -17,6 +17,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -77,6 +78,14 @@ class Product(TimestampMixin, Base):
     markdown: Mapped[str | None] = mapped_column(Text, nullable=True)
     #: sha256 of markdown, so we can tell whether a re-crawl changed anything.
     content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+    #: What the website means, extracted once: domain, problems, pain words.
+    #: This is what the search actually uses - the markdown above is only the
+    #: raw material it was read from.
+    profile: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    #: The content_hash the profile was built from. A re-crawl that changes
+    #: nothing leaves this matching, so the extraction is not paid for twice.
+    profile_source_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     page_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     word_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

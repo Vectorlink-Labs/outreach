@@ -1,16 +1,22 @@
 import { useCallback, useEffect, useRef } from "react";
 
-import { DEFAULT_KEYWORDS } from "@/lib/mockData";
 import type { BriefInput } from "@/lib/types";
 
-const STORAGE_KEY = "outreach.brief.draft.v1";
+const STORAGE_KEY = "outreach.brief.draft.v2";
 
+/**
+ * A genuinely empty brief.
+ *
+ * This used to arrive pre-filled with "Coalent" and its keywords, which made
+ * every new search start as a search for someone else's product. Placeholders
+ * belong in `fields.ts`; values belong to the user.
+ */
 export const EMPTY_BRIEF: BriefInput = {
-  productName: "Coalent",
-  productUrl: "https://coalent.ai",
+  productName: "",
+  productUrl: "",
   description: "",
-  keywords: DEFAULT_KEYWORDS,
-  sources: ["github", "hackernews"],
+  keywords: [],
+  sources: ["github"],
   daysBack: 30,
 };
 

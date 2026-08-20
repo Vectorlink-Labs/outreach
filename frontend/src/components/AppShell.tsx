@@ -4,7 +4,6 @@ import { Link as RouterLink } from "react-router-dom";
 import AppBar from "@mui/material/AppBar";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
-import Chip from "@mui/material/Chip";
 import IconButton from "@mui/material/IconButton";
 import Toolbar from "@mui/material/Toolbar";
 import Tooltip from "@mui/material/Tooltip";
@@ -13,7 +12,6 @@ import Typography from "@mui/material/Typography";
 import DarkModeOutlinedIcon from "@mui/icons-material/DarkModeOutlined";
 import LightModeOutlinedIcon from "@mui/icons-material/LightModeOutlined";
 
-import { USING_MOCK } from "@/lib/client";
 
 interface Props {
   mode: "light" | "dark";
@@ -41,12 +39,6 @@ export default function AppShell({ mode, onToggleMode, children }: Props) {
           </Typography>
 
           <Box sx={{ flexGrow: 1 }} />
-
-          {USING_MOCK && (
-            <Tooltip title="No backend yet. Every screen is running on sample data from src/lib/mockApi.ts.">
-              <Chip size="small" label="Sample data" color="warning" variant="outlined" />
-            </Tooltip>
-          )}
 
           <Button component={RouterLink} to="/briefs" size="small" color="inherit">
             Briefs

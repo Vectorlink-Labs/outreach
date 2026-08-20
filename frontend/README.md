@@ -40,18 +40,27 @@ npm run types
 
 **`src/features/brief-form/fields.ts`** — same story for field metadata.
 
-## The fake backend
+## The backend
 
-`src/lib/mockApi.ts` implements the same `Api` interface as `src/lib/api.ts`.
-`src/lib/client.ts` picks one:
+`src/lib/client.ts` exports the real HTTP client and nothing else.
+
+There used to be an in-browser fake so screens could be built before FastAPI
+existed. It answers now, so the fake is gone — two implementations of one
+interface means every new field has to be added twice, and the one nobody is
+looking at drifts. A drifted mock is worse than none, because it makes a
+screen look right while it is wrong.
+
+Start the backend before the frontend:
 
 ```bash
-# frontend/.env.local
-VITE_USE_MOCK=false
-VITE_API_BASE=            # empty uses the dev proxy in vite.config.ts
+cd backend && .venv\Scripts\python.exe -m uvicorn outreach.main:app --reload
 ```
 
-Nothing else changes. The service has to answer these:
+`vite.config.ts` proxies `/api` to `http://localhost:8000`, so no CORS and no
+configuration is needed in development. `VITE_API_BASE` only matters when
+pointing at a deployed API.
+
+The service answers these:
 
 ```
 POST /api/briefs                     → Brief
@@ -88,9 +97,16 @@ failures, so the service can ship the stream later without a frontend change.
 6. **No blank pages.** Loading, empty and failed each have a real screen.
 7. **The system never posts.** `ReplyDrawer` has a Copy button and nothing else.
 
-## Known deviation from the root README
+## UI library: Material UI (settled)
 
-The root README says `frontend/ React + shadcn/ui`. This is **Material UI**, on
-an explicit instruction. `tailwind.config.ts` and `src/components/ui/` are
-therefore unused. Either delete them or say the word and this gets rebuilt on
-shadcn.
+**MUI is the decision.** The root README and the build plan have been updated to
+match, so there is no longer a deviation to track.
+
+The scaffold originally said shadcn/ui; that is no longer the plan. Two leftovers
+from it can be deleted whenever someone is passing:
+
+- `tailwind.config.ts`
+- `src/components/ui/` (the empty shadcn primitives directory)
+
+Theme lives in `src/styles/theme.ts` and is applied through `ThemeProvider` in
+`App.tsx`. Use MUI components and the theme tokens; do not add Tailwind classes.

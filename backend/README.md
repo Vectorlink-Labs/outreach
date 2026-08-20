@@ -25,21 +25,41 @@ Meaning-search needs the `pgvector` extension, and that is awkward to install on
 Windows without Docker. Nothing in the current code uses it, so leave it. Deal
 with it when the retrieval work starts.
 
-## 2. Create the role and the database
+## 2. Choose a database account
 
-Open **SQL Shell (psql)** from the Start menu, press Enter through the prompts,
-and give the `postgres` password when asked. Then:
+The database and its tables are created for you on first startup either way. The
+only decision is which account the app logs in as.
 
-```sql
-CREATE ROLE outreach WITH LOGIN PASSWORD 'outreach';
-CREATE DATABASE outreach OWNER outreach;
+### Option A — nothing to do
+
+Use the `postgres` superuser the installer already created. In `.env`, put the
+password you chose during installation:
+
+```
+DATABASE_URL=postgresql+asyncpg://postgres:YOUR_INSTALL_PASSWORD@localhost:5432/outreach
 ```
 
-Type `\q` to leave.
+URL-encode special characters: `@` → `%40`, `#` → `%23`, `/` → `%2F`.
 
-> Do this once. Never create tables by hand here — Alembic keeps its own record
-> of what it has applied, and a hand-made table is invisible to it. The next
-> migration then fails in a confusing way.
+No SQL to run. Fine locally; never ship a superuser connection to production.
+
+### Option B — a dedicated role
+
+One command, slightly safer, and it matches the default already in `.env.example`.
+
+Open **SQL Shell (psql)** from the Start menu, press Enter through the prompts,
+give the `postgres` password, then:
+
+```sql
+CREATE ROLE outreach WITH LOGIN CREATEDB PASSWORD 'outreach';
+```
+
+`\q` to leave. `CREATEDB` matters — without it the app cannot create its own
+database and startup stops with a message telling you so.
+
+> Never create tables by hand in psql. Alembic keeps its own record of what it
+> has applied, and a hand-made table is invisible to it, so the next migration
+> fails in a confusing way.
 
 ## 3. Set up Python
 
@@ -59,13 +79,20 @@ copy .env.example .env
 DATABASE_URL=postgresql+asyncpg://outreach:outreach@localhost:5432/outreach
 ```
 
-## 4. Create the tables
+## 4. Tables — nothing to do
+
+The database and its tables are created on first startup, and every new migration
+is applied automatically. Two tables appear: `product` and `product_page`.
+
+This is controlled by `AUTO_MIGRATE=true` in `.env`. **Set it to `false` in
+production** — two instances starting together would migrate at the same time, and
+a bad migration should fail a deploy rather than take the running service down.
+
+To apply migrations by hand instead:
 
 ```bash
 .venv\Scripts\python.exe -m alembic upgrade head
 ```
-
-Two tables appear: `product` and `product_page`.
 
 ## 5. Run it
 

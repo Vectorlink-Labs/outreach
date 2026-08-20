@@ -1,15 +1,12 @@
 import { httpApi, type Api } from "./api";
-import { mockApi } from "./mockApi";
 
 /**
- * The fake backend is the default.
+ * The backend.
  *
- * The FastAPI service does not answer yet, and every screen has to be
- * reviewable before it does. To point at the real thing:
- *
- *     # frontend/.env.local
- *     VITE_USE_MOCK=false
+ * There used to be an in-browser fake here so screens could be built before
+ * FastAPI answered. It answers now, so the fake is gone: two implementations
+ * of one interface means every new field has to be added twice, and the one
+ * nobody is looking at drifts. A drifted mock is worse than none, because it
+ * makes a screen look right while it is wrong.
  */
-export const USING_MOCK = import.meta.env.VITE_USE_MOCK !== "false";
-
-export const api: Api = USING_MOCK ? mockApi : httpApi;
+export const api: Api = httpApi;

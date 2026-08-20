@@ -31,6 +31,27 @@ class Settings(BaseSettings):
     #: the same time, and a bad migration should fail a deploy, not the app.
     auto_migrate: bool = True
 
+    # ---- sources ---------------------------------------------------------
+    #: A fine-grained token with NO scopes is enough - public data only. It
+    #: raises the search limit from 10 requests per minute to 30, which is
+    #: the difference between a usable run and a useless one.
+    github_token: str = ""
+
+    # ---- ranking ---------------------------------------------------------
+    openai_api_key: str = ""
+    #: 1536 dimensions, and cheap enough that ranking a few hundred results
+    #: costs a fraction of a cent.
+    embedding_model: str = "text-embedding-3-small"
+    #: Reads one post and judges intent. A small, cheap model is enough:
+    #: this is classification against a rubric, not reasoning.
+    llm_model: str = "gpt-4o-mini"
+
+    #: Per source, per run. Not a target: a ceiling, so one run cannot spend
+    #: the whole organisation's rate limit.
+    source_max_requests: int = Field(default=40, ge=1)
+    source_max_items: int = Field(default=1000, ge=1)
+    source_max_seconds: float = Field(default=90.0, ge=5.0)
+
     # ---- crawling --------------------------------------------------------
     user_agent: str = "OutreachBot/0.1 (+https://vectorlinklabs.com/bot)"
     http_timeout_seconds: float = 20.0
