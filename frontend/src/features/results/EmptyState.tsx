@@ -18,7 +18,7 @@ export default function EmptyState() {
         The run finished and no conversation was worth showing. Try a wider date
         window, or drop your narrowest term and compile the plan again.
       </Typography>
-      <Button component={RouterLink} to="/" variant="outlined">
+      <Button component={RouterLink} to="/new" variant="outlined">
         Change the brief
       </Button>
     </Paper>

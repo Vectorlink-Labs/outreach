@@ -47,7 +47,7 @@ export default function RunRoute() {
       <Box sx={{ maxWidth: 860, mx: "auto", px: 2, py: 7 }}>
         <ErrorBlock
           message={run.error ?? "The run stopped before it finished."}
-          onRetry={() => navigate("/")}
+          onRetry={() => navigate("/new")}
         />
       </Box>
     );

@@ -131,7 +131,7 @@ export default function ReviewPlanRoute() {
         <Button variant="contained" size="large" onClick={start} disabled={starting || terms.length === 0}>
           {starting ? "Starting…" : "Looks right, run it"}
         </Button>
-        <Button color="inherit" onClick={() => navigate("/")}>
+        <Button color="inherit" onClick={() => navigate("/new")}>
           Back and change the brief
         </Button>
       </Stack>

@@ -15,7 +15,6 @@ import json
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, status
 from fastapi.responses import Response, StreamingResponse
-
 from pydantic import BaseModel
 
 from outreach import keywords as keyword_service

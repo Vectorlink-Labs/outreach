@@ -70,7 +70,7 @@ export default function ReadingWebsiteRoute() {
      have no service yet. Only the product half is real. */
   const carryOn = async () => {
     if (!briefId) {
-      navigate("/");
+      navigate("/new");
       return;
     }
     setContinuing(true);

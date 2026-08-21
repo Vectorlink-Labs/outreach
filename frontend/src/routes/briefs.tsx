@@ -66,7 +66,7 @@ export default function BriefsRoute() {
         eyebrow="Saved"
         title="Your briefs"
         action={
-          <Button component={RouterLink} to="/" variant="contained">
+          <Button component={RouterLink} to="/new" variant="contained">
             New search
           </Button>
         }
@@ -84,7 +84,7 @@ export default function BriefsRoute() {
             Describe what you are looking for and we keep the brief here, so you can run
             it again whenever you want.
           </Typography>
-          <Button component={RouterLink} to="/" variant="outlined">
+          <Button component={RouterLink} to="/new" variant="outlined">
             Write the first one
           </Button>
         </Paper>

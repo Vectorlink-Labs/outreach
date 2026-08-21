@@ -78,7 +78,7 @@ export default function SettingsProductRoute() {
   }, [refresh, scheduleIfBusy]);
 
   const create = async (name: string, url: string) => {
-    await productApi.create(name, url);
+    await productApi.create({ name, url });
     setToast(`Reading ${url}. This takes anywhere from ten seconds to a few minutes.`);
     scheduleIfBusy(await refresh());
   };

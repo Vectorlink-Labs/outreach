@@ -12,25 +12,59 @@ from outreach.db.models.product import Product, ProductPage
 
 
 async def get(session: AsyncSession, product_id: uuid.UUID) -> Product | None:
+    """
+    By id, with no ownership check.
+
+    For the background crawl, which runs outside any request and has no
+    signed-in user. Anything reachable from an HTTP route must use
+    `get_owned` instead.
+    """
     return await session.get(Product, product_id)
 
 
-async def get_with_pages(session: AsyncSession, product_id: uuid.UUID) -> Product | None:
+async def get_owned(
+    session: AsyncSession, product_id: uuid.UUID, user_id: uuid.UUID
+) -> Product | None:
+    """
+    By id, but only if this account owns it.
+
+    Ownership is part of the query rather than a check afterwards. A separate
+    `if product.user_id != user.id` is one forgotten line away from letting
+    anybody read anybody else's data, and the forgotten line looks fine in
+    review.
+    """
+    stmt = select(Product).where(Product.id == product_id, Product.user_id == user_id)
+    return (await session.execute(stmt)).scalar_one_or_none()
+
+
+async def get_owned_with_pages(
+    session: AsyncSession, product_id: uuid.UUID, user_id: uuid.UUID
+) -> Product | None:
     stmt = (
         select(Product)
-        .where(Product.id == product_id)
+        .where(Product.id == product_id, Product.user_id == user_id)
         .options(selectinload(Product.pages))
     )
     return (await session.execute(stmt)).scalar_one_or_none()
 
 
-async def get_by_domain(session: AsyncSession, domain: str) -> Product | None:
-    stmt = select(Product).where(Product.domain == domain)
+async def get_by_domain(
+    session: AsyncSession, domain: str, user_id: uuid.UUID
+) -> Product | None:
+    """Per owner. Two accounts may legitimately track the same website."""
+    stmt = select(Product).where(Product.domain == domain, Product.user_id == user_id)
     return (await session.execute(stmt)).scalar_one_or_none()
 
 
-async def list_all(session: AsyncSession, limit: int = 50) -> list[Product]:
-    stmt = select(Product).order_by(Product.created_at.desc()).limit(limit)
+async def list_for_user(
+    session: AsyncSession, user_id: uuid.UUID, limit: int = 50
+) -> list[Product]:
+    stmt = (
+        select(Product)
+        .where(Product.user_id == user_id)
+        .order_by(Product.created_at.desc())
+        .limit(limit)
+    )
     return list((await session.execute(stmt)).scalars())
 
 

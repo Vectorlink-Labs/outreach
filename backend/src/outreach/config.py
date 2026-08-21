@@ -21,6 +21,15 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     cors_origins: str = "http://localhost:5173"
 
+    # ---- accounts --------------------------------------------------------
+    #: Signs session cookies. Changing it logs everybody out, which is the
+    #: intended emergency lever. MUST be set to something random in
+    #: production: the default below is public knowledge.
+    secret_key: str = "dev-only-not-a-secret-change-me"
+    session_days: int = Field(default=30, ge=1)
+    #: Send the cookie over https only. False locally because dev is http.
+    cookie_secure: bool = False
+
     # ---- database --------------------------------------------------------
     database_url: str = "postgresql+asyncpg://outreach:outreach@localhost:5432/outreach"
     db_echo: bool = False

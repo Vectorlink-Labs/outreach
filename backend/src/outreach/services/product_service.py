@@ -26,28 +26,34 @@ class ProductError(Exception):
     """Something the user needs to know about, phrased for a person."""
 
 
-async def get_or_create(session: AsyncSession, payload: ProductCreate) -> tuple[Product, bool]:
+async def get_or_create(
+    session: AsyncSession, payload: ProductCreate, user_id: uuid.UUID
+) -> tuple[Product, bool]:
     """
-    Register a product, or hand back the one we already have for that domain.
+    Register a product, or hand back the one this account already has for
+    that domain.
 
     Returns (product, created). When created is False the caller must NOT
     start a crawl: we already read that site once, and re-reading only ever
     happens when a person presses the button.
 
     Asking for the same site twice is not an error. It is what happens when
-    somebody starts a second search for the same product, which is normal.
+    somebody comes back to a product they already added, which is normal.
     """
     try:
         canonical = canonicalize(payload.url)
     except ValueError as exc:
         raise ProductError(f"That does not look like a website address: {payload.url}") from exc
 
-    existing = await repo.get_by_domain(session, canonical.domain)
+    existing = await repo.get_by_domain(session, canonical.domain, user_id)
     if existing is not None:
         return existing, False
 
     product = Product(
+        user_id=user_id,
         name=payload.name.strip(),
+        description=(payload.description or "").strip() or None,
+        goal=(payload.goal or "").strip() or None,
         input_url=payload.url.strip(),
         canonical_url=canonical.origin,
         domain=canonical.domain,

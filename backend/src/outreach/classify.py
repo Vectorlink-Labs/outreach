@@ -27,7 +27,7 @@ from pathlib import Path
 
 import httpx
 import structlog
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from outreach.config import settings
 from outreach.schemas.conversation import Conversation

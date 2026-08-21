@@ -16,6 +16,16 @@ class ProductCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     url: str = Field(min_length=3, max_length=2048)
 
+    #: What the product does, in the owner's words. The crawl describes the
+    #: website; this describes the product, and the two disagree more often
+    #: than you would expect.
+    description: str | None = Field(default=None, max_length=4000)
+
+    #: What they are trying to achieve. Different goals make completely
+    #: different posts valuable, so this reaches the scorer rather than
+    #: sitting unused in a form.
+    goal: str | None = Field(default=None, max_length=2000)
+
 
 class ProductPageOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -41,6 +51,8 @@ class ProductOut(BaseModel):
 
     id: uuid.UUID
     name: str
+    description: str | None = None
+    goal: str | None = None
     input_url: str
     canonical_url: str
     domain: str

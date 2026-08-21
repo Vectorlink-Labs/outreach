@@ -25,9 +25,18 @@ export interface ProductPage {
   fetchedAt: string;
 }
 
+export interface ProductInput {
+  name: string;
+  url: string;
+  description?: string;
+  goal?: string;
+}
+
 export interface Product {
   id: string;
   name: string;
+  description: string | null;
+  goal: string | null;
   inputUrl: string;
   canonicalUrl: string;
   domain: string;
@@ -65,6 +74,8 @@ interface RawPage {
 interface RawProduct {
   id: string;
   name: string;
+  description: string | null;
+  goal: string | null;
   input_url: string;
   canonical_url: string;
   domain: string;
@@ -88,6 +99,8 @@ function toProduct(raw: RawProduct): Product {
   return {
     id: raw.id,
     name: raw.name,
+    description: raw.description,
+    goal: raw.goal,
     inputUrl: raw.input_url,
     canonicalUrl: raw.canonical_url,
     domain: raw.domain,
@@ -133,6 +146,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   try {
     response = await fetch(`${BASE}${path}`, {
       headers: { "Content-Type": "application/json" },
+      // The session is an httpOnly cookie. Without this, every call is
+      // anonymous and every endpoint answers 401.
+      credentials: "include",
       ...init,
     });
   } catch {
@@ -150,6 +166,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     } catch {
       /* not json, keep the status line */
     }
+    // The session went away mid-use. Tell the app so it can send them to
+    // the login page with an explanation, rather than showing a red box on
+    // a screen that still looks signed in.
+    if (response.status === 401) {
+      window.dispatchEvent(new Event("outreach:unauthorised"));
+    }
+
     throw new ApiError(detail, response.status);
   }
 
@@ -176,10 +199,15 @@ export const productApi = {
     return toProduct(await request<RawProduct>(`/products/${id}`));
   },
 
-  async create(name: string, url: string): Promise<Product> {
+  async create(input: ProductInput): Promise<Product> {
     const raw = await request<RawProduct>("/products", {
       method: "POST",
-      body: JSON.stringify({ name, url }),
+      body: JSON.stringify({
+        name: input.name,
+        url: input.url,
+        description: input.description || null,
+        goal: input.goal || null,
+      }),
     });
     return toProduct(raw);
   },
@@ -193,7 +221,9 @@ export const productApi = {
   },
 
   async markdown(id: string): Promise<string> {
-    const response = await fetch(`${BASE}/products/${id}/markdown`);
+    const response = await fetch(`${BASE}/products/${id}/markdown`, {
+      credentials: "include",
+    });
     if (!response.ok) {
       throw new ApiError(`Could not load the document (${response.status}).`, response.status);
     }

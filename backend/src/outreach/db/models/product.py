@@ -53,7 +53,27 @@ class Product(TimestampMixin, Base):
 
     id: Mapped[uuid.UUID] = uuid_pk()
 
+    #: Nullable only because products existed before accounts did. Anything
+    #: created from now on has an owner, and a NULL row belongs to nobody and
+    #: is therefore visible to nobody.
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        PgUUID(as_uuid=True),
+        ForeignKey("app_user.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+
     name: Mapped[str] = mapped_column(String(200), nullable=False)
+
+    #: What it does, in the owner's words. The crawl describes the website;
+    #: this describes the product, and the two disagree more often than you
+    #: would expect.
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    #: What they are trying to achieve. "First hundred users" and "find design
+    #: partners" and "hire engineers" make completely different posts
+    #: valuable, so this has to reach the scorer rather than sit in a form.
+    goal: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     #: Exactly what the user typed, kept so we can show it back to them.
     input_url: Mapped[str] = mapped_column(String(2048), nullable=False)
     #: Normalised origin, e.g. https://coalent.ai
@@ -112,8 +132,12 @@ class Product(TimestampMixin, Base):
     )
 
     __table_args__ = (
-        UniqueConstraint("domain", name="uq_product_domain"),
+        # Per owner, not global. Two customers may both be tracking the same
+        # website, and one of them getting "already registered" because a
+        # stranger added it first would be absurd.
+        UniqueConstraint("user_id", "domain", name="uq_product_user_domain"),
         Index("ix_product_state", "state"),
+        Index("ix_product_user", "user_id"),
     )
 
     def __repr__(self) -> str:  # pragma: no cover

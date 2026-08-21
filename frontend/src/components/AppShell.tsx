@@ -1,10 +1,16 @@
-import type { ReactNode } from "react";
-import { Link as RouterLink } from "react-router-dom";
+import { useState, type ReactNode } from "react";
+import { Link as RouterLink, useNavigate } from "react-router-dom";
 
 import AppBar from "@mui/material/AppBar";
+import Avatar from "@mui/material/Avatar";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
+import Divider from "@mui/material/Divider";
 import IconButton from "@mui/material/IconButton";
+import ListItemText from "@mui/material/ListItemText";
+import Menu from "@mui/material/Menu";
+import MenuItem from "@mui/material/MenuItem";
+import Stack from "@mui/material/Stack";
 import Toolbar from "@mui/material/Toolbar";
 import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
@@ -12,6 +18,7 @@ import Typography from "@mui/material/Typography";
 import DarkModeOutlinedIcon from "@mui/icons-material/DarkModeOutlined";
 import LightModeOutlinedIcon from "@mui/icons-material/LightModeOutlined";
 
+import { useAuth } from "@/lib/auth";
 
 interface Props {
   mode: "light" | "dark";
@@ -20,6 +27,22 @@ interface Props {
 }
 
 export default function AppShell({ mode, onToggleMode, children }: Props) {
+  const { user, logOut } = useAuth();
+  const navigate = useNavigate();
+  const [anchor, setAnchor] = useState<HTMLElement | null>(null);
+
+  const initials = (user?.name ?? "?")
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() ?? "")
+    .join("");
+
+  const signOut = async () => {
+    setAnchor(null);
+    await logOut();
+    navigate("/", { replace: true });
+  };
+
   return (
     <Box sx={{ minHeight: "100vh", bgcolor: "background.default" }}>
       <AppBar
@@ -28,37 +51,93 @@ export default function AppShell({ mode, onToggleMode, children }: Props) {
         color="transparent"
         sx={{ bgcolor: "background.paper", borderBottom: 1, borderColor: "divider" }}
       >
-        <Toolbar variant="dense" sx={{ gap: 1 }}>
+        {/* Three columns rather than flex with a spacer. The outer two are
+            1fr each, so the navigation sits on the true centre of the page
+            and does not shift when a longer name appears on the right. */}
+        <Toolbar
+          variant="dense"
+          sx={{
+            display: "grid",
+            gridTemplateColumns: "1fr auto 1fr",
+            alignItems: "center",
+            gap: 1,
+          }}
+        >
           <Typography
             component={RouterLink}
-            to="/"
+            to="/home"
             variant="subtitle2"
-            sx={{ fontWeight: 700, color: "text.primary", textDecoration: "none" }}
+            sx={{
+              justifySelf: "start",
+              fontWeight: 700,
+              color: "text.primary",
+              textDecoration: "none",
+            }}
           >
             Outreach
           </Typography>
 
-          <Box sx={{ flexGrow: 1 }} />
+          <Stack direction="row" spacing={1} sx={{ justifySelf: "center" }}>
+            <Button component={RouterLink} to="/home" size="small" color="inherit">
+              Home
+            </Button>
+            <Button component={RouterLink} to="/settings/product" size="small" color="inherit">
+              Products
+            </Button>
+            <Button component={RouterLink} to="/new" size="small" variant="outlined">
+              New product
+            </Button>
+          </Stack>
 
-          <Button component={RouterLink} to="/briefs" size="small" color="inherit">
-            Briefs
-          </Button>
-          <Button component={RouterLink} to="/settings/product" size="small" color="inherit">
-            Product
-          </Button>
-          <Button component={RouterLink} to="/" size="small" variant="outlined">
-            New search
-          </Button>
+          <Stack direction="row" spacing={1} alignItems="center" sx={{ justifySelf: "end" }}>
+            <Tooltip title={mode === "light" ? "Dark theme" : "Light theme"}>
+              <IconButton size="small" onClick={onToggleMode}>
+                {mode === "light" ? (
+                  <DarkModeOutlinedIcon fontSize="small" />
+                ) : (
+                  <LightModeOutlinedIcon fontSize="small" />
+                )}
+              </IconButton>
+            </Tooltip>
 
-          <Tooltip title={mode === "light" ? "Dark theme" : "Light theme"}>
-            <IconButton size="small" onClick={onToggleMode} sx={{ ml: 0.5 }}>
-              {mode === "light" ? (
-                <DarkModeOutlinedIcon fontSize="small" />
-              ) : (
-                <LightModeOutlinedIcon fontSize="small" />
-              )}
-            </IconButton>
-          </Tooltip>
+            <Tooltip title={user?.name ?? "Account"}>
+              <IconButton size="small" onClick={(e) => setAnchor(e.currentTarget)}>
+                <Avatar
+                  sx={{
+                    width: 28,
+                    height: 28,
+                    fontSize: 12,
+                    fontWeight: 700,
+                    bgcolor: "primary.main",
+                    color: "primary.contrastText",
+                  }}
+                >
+                  {initials}
+                </Avatar>
+              </IconButton>
+            </Tooltip>
+
+            <Menu
+              anchorEl={anchor}
+              open={Boolean(anchor)}
+              onClose={() => setAnchor(null)}
+              anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
+              transformOrigin={{ vertical: "top", horizontal: "right" }}
+            >
+              <MenuItem disabled sx={{ opacity: "1 !important" }}>
+                <ListItemText
+                  primary={user?.name}
+                  secondary={user?.email}
+                  slotProps={{
+                    primary: { fontWeight: 620, fontSize: 14 },
+                    secondary: { fontSize: 12 },
+                  }}
+                />
+              </MenuItem>
+              <Divider />
+              <MenuItem onClick={signOut}>Sign out</MenuItem>
+            </Menu>
+          </Stack>
         </Toolbar>
       </AppBar>
 
