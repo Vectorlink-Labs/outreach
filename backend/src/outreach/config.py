@@ -55,6 +55,29 @@ class Settings(BaseSettings):
     #: this is classification against a rubric, not reasoning.
     llm_model: str = "gpt-4o-mini"
 
+    #: Writes the marketing plan. A bigger model than the classifier on
+    #: purpose: judging one post against a rubric is easy, and writing a plan
+    #: that is specific to one product rather than generic advice is not.
+    #: One call per product, so the cost difference is a few cents a month.
+    planner_model: str = "gpt-4o"
+
+    #: Keep only authors with no history in the repository they posted in.
+    #:
+    #: On, this removes roughly 80% of results - people writing tickets in
+    #: their own project, who will fix the problem themselves rather than buy
+    #: anything. Off, everything comes through and the score has to do the
+    #: work on its own, which is worth testing: if the top 20 still looks
+    #: right, the filter is redundant and you are seeing more.
+    outsiders_only: bool = True
+
+    #: Ignore issues in projects smaller than this.
+    #:
+    #: Phrase searches cover the whole of GitHub, so without it a run
+    #: returns one-person side projects alongside the real ones.
+    #: Commenting in a four-star repository reaches nobody. 500 keeps the
+    #: established projects and removes the noise; 0 turns it off.
+    min_repo_stars: int = 500
+
     #: Per source, per run. Not a target: a ceiling, so one run cannot spend
     #: the whole organisation's rate limit.
     source_max_requests: int = Field(default=40, ge=1)

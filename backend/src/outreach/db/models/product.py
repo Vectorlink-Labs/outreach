@@ -107,6 +107,15 @@ class Product(TimestampMixin, Base):
     #: nothing leaves this matching, so the extraction is not paid for twice.
     profile_source_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
+    #: The planner agent's marketing plan: strategy, audience, platforms.
+    plan: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    #: Covers the profile, the description and the goal together, so editing
+    #: the goal produces a new plan and a no-op re-crawl does not.
+    plan_source_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    plan_made_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     page_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     word_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     bytes_fetched: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

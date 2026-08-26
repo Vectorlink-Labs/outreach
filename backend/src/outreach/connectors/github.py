@@ -17,9 +17,11 @@ Two GitHub limits shape all of it and neither is optional:
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 import time
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import httpx
 import structlog
@@ -37,8 +39,28 @@ MAX_QUERY_CHARS = 256
 HARD_RESULT_CAP = 1000
 PER_PAGE = 100
 
+#: Pages any single query may take before we move on to the next one.
+#:
+#: Without this, one broad phrase eats the whole request budget. A term
+#: matching 90,000 issues will happily hand over 1,000 of them - all chosen
+#: by GitHub's idea of relevance, not ours - while the other five phrases
+#: never run at all. Three pages each spreads the same budget across more
+#: angles, and breadth beats depth when every phrase matches thousands.
+MAX_PAGES_PER_QUERY = 3
+
 _BOT = re.compile(r"(\[bot\]$|^dependabot|^renovate|^github-actions|-bot$)", re.I)
 _REPO_FROM_API_URL = re.compile(r"/repos/([^/]+/[^/]+)")
+
+
+def is_bot_login(login: str | None) -> bool:
+    """
+    Does this handle belong to a bot?
+
+    Public because the Discussions connector needs exactly the same answer,
+    and two copies of this regex would drift the first time somebody adds a
+    new bot to one of them.
+    """
+    return bool(login and _BOT.search(login))
 
 
 class SearchResult(BaseModel):
@@ -52,11 +74,46 @@ class SearchResult(BaseModel):
 # ---------------------------------------------------------------- 1. queries
 
 
+#: Separates the halves of an intersection term: "prompt caching + RAG".
+#:
+#: See `render_phrase` for why this exists at all.
+INTERSECT = "+"
+
+
+def render_phrase(phrase: str) -> str:
+    """
+    One phrase to the search syntax it means.
+
+    Two forms, and picking the wrong one is the difference between a search
+    and a lottery:
+
+        prompt caching        ->  "prompt caching"
+        prompt caching + RAG  ->  "prompt caching" RAG
+
+    A plain phrase is quoted, so GitHub matches it as an exact string. That
+    is right for a term of art - people write "prompt caching" verbatim - and
+    it is also why a single phrase is such a blunt instrument. `"prompt
+    caching"` matches every post that mentions caching at all, tens of
+    thousands of them, of which GitHub serves the first thousand.
+
+    A `+` asks for the **intersection** instead: both concepts, anywhere in
+    the post, in either order. Unquoted terms are ANDed by GitHub, which the
+    quoting rule above hides. That is the form that finds the good posts,
+    because the good posts are always about two things at once - caching AND
+    retrieval, context AND invalidation. Someone writing about only one of
+    them is writing about something else.
+    """
+    parts = [p.strip().strip('"') for p in phrase.split(INTERSECT)]
+    parts = [" ".join(p.split()) for p in parts if p.strip()]
+    return " ".join(f'"{p}"' if " " in p else p for p in parts)
+
+
 def build_query(
     phrase: str = "",
     repo: str | None = None,
     days: int = 30,
     exclude: list[str] | None = None,
+    state: str | None = "open",
 ) -> str:
     """
     Build one search string, trimmed to fit GitHub's 256 character limit.
@@ -70,14 +127,20 @@ def build_query(
 
     parts: list[str] = []
     if phrase:
-        clean = " ".join(phrase.split()).strip('"')
-        # Unquoted "stale embeddings" means "stale AND embeddings anywhere",
-        # which matches far more and far worse than the phrase does.
-        parts.append(f'"{clean}"' if " " in clean else clean)
+        rendered = render_phrase(phrase)
+        if rendered:
+            parts.append(rendered)
 
     # /search/issues returns pull requests too, and someone's own patch is
     # almost never a marketing opportunity.
     parts.append("is:issue")
+
+    # Open issues only, by default. A closed one is usually solved, and
+    # arriving weeks later to comment on a problem somebody already fixed is
+    # the wrong kind of outreach. Pass state=None to include everything.
+    if state in ("open", "closed"):
+        parts.append(f"is:{state}")
+
     parts.append(f"created:>={since}")
 
     if repo:
@@ -100,6 +163,7 @@ def build_queries(
     repos: list[str] | None = None,
     days: int = 30,
     exclude: list[str] | None = None,
+    state: str | None = "open",
 ) -> list[tuple[str, str]]:
     """
     One query per phrase, plus one per repository. Returns (label, query).
@@ -120,13 +184,13 @@ def build_queries(
         clean = " ".join(phrase.split())
         if not clean:
             continue
-        query = build_query(clean, days=days, exclude=exclude)
+        query = build_query(clean, days=days, exclude=exclude, state=state)
         if query not in seen:
             seen.add(query)
             out.append((f"phrase: {clean}", query))
 
     for repo in repos or []:
-        query = build_query(repo=repo, days=days)
+        query = build_query(repo=repo, days=days, state=state)
         if query not in seen:
             seen.add(query)
             out.append((f"repo: {repo}", query))
@@ -162,9 +226,7 @@ def to_conversation(item: dict) -> Conversation | None:
             title=item.get("title"),
             body=item.get("body") or "",
             author=handle,
-            author_is_bot=(
-                user.get("type") == "Bot" or bool(handle and _BOT.search(handle))
-            ),
+            author_is_bot=(user.get("type") == "Bot" or is_bot_login(handle)),
             created_at=datetime.fromisoformat(created.replace("Z", "+00:00")),
             score=_reactions(reactions),
             comments=int(item.get("comments") or 0),
@@ -201,15 +263,260 @@ def _repo(item: dict) -> str | None:
 # ---------------------------------------------------------------- 3. fetching
 
 
-#: The only association that means a genuine outsider.
+#: Associations that mean the author works on the repository they posted in.
 #:
-#: An allowlist rather than a blocklist, because GitHub keeps adding values
-#: (FIRST_TIME_CONTRIBUTOR, MANNEQUIN, ...) and a blocklist silently lets each
-#: new one through. CONTRIBUTOR is excluded deliberately: it means the author
-#: has had a pull request merged into that repository, so they are working on
-#: the project, not evaluating tools for it. That single change removed both
-#: of the false positives this filter was written for.
-OUTSIDER = frozenset({"NONE"})
+#: A blocklist, after a spell as an allowlist of `{"NONE"}` alone. The
+#: allowlist was safer in principle - GitHub keeps adding values, and a
+#: blocklist lets each new one through - and far too strict in practice. It
+#: removed about 80% of every result set, and the thing it removed most of
+#: was CONTRIBUTOR.
+#:
+#: CONTRIBUTOR was excluded on the reasoning that a merged pull request means
+#: you work on the project. Mostly it means you fixed a typo once. The
+#: engaged power user who files the thoughtful feature request about caching
+#: on llama.cpp or LibreChat is nearly always a CONTRIBUTOR, and they are
+#: exactly who we are looking for: heavy user, hits real limits, has an
+#: audience in the thread.
+#:
+#: What we actually want gone is people writing tickets in their own project,
+#: and those three values name them precisely. A `None` association - which
+#: happens - falls through and is kept, which is the right default.
+INSIDER = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
+
+
+REPO_URL = "https://api.github.com/repos"
+
+#: Star counts, remembered between runs.
+#:
+#: Stars barely move week to week, and the same repositories come back run
+#: after run, so looking them up once is the difference between a filter that
+#: costs a minute and one that costs nothing.
+_STARS_CACHE = Path(__file__).resolve().parents[3] / ".cache" / "repo_stars.json"
+
+
+def _load_stars() -> dict[str, int]:
+    try:
+        return json.loads(_STARS_CACHE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_stars(stars: dict[str, int]) -> None:
+    try:
+        _STARS_CACHE.parent.mkdir(parents=True, exist_ok=True)
+        _STARS_CACHE.write_text(json.dumps(stars), encoding="utf-8")
+    except OSError:
+        pass
+
+
+async def repo_stars(
+    client: httpx.AsyncClient, names: list[str]
+) -> dict[str, int]:
+    """
+    How many stars each repository has. Unknown ones come back as -1.
+
+    Uses the plain repository endpoint, which is on the 5,000-per-hour core
+    limit rather than the 30-per-minute search limit, so this never competes
+    with the search itself. Twelve at a time, because that is fast without
+    tripping the secondary limit that punishes concurrency.
+    """
+    known = _load_stars()
+    missing = [n for n in names if n and n not in known]
+
+    if missing:
+        headers = {"Accept": "application/vnd.github+json"}
+        if settings.github_token:
+            headers["Authorization"] = f"Bearer {settings.github_token}"
+
+        semaphore = asyncio.Semaphore(12)
+
+        async def one(name: str) -> None:
+            async with semaphore:
+                try:
+                    response = await client.get(
+                        f"{REPO_URL}/{name}", headers=headers, follow_redirects=True
+                    )
+                    known[name] = (
+                        response.json().get("stargazers_count", 0)
+                        if response.status_code == 200
+                        else -1
+                    )
+                except Exception:
+                    known[name] = -1
+
+        await asyncio.gather(*(one(name) for name in missing))
+        _save_stars(known)
+
+    return {n: known.get(n, -1) for n in names if n}
+
+
+async def check_repos(
+    client: httpx.AsyncClient, repos: list[str]
+) -> tuple[list[str], list[str]]:
+    """
+    Keep the repositories that exist, following renames. Returns (good, bad).
+
+    Worth a request each because these come from a model's memory, and that
+    memory is out of date: projects get renamed, move between organisations,
+    or never existed under the name it recalled. A bad name does not fail
+    quietly - GitHub rejects the whole search query with a wall of JSON.
+
+    This uses the plain repository endpoint, which is on the 5,000-per-hour
+    core limit rather than the 30-per-minute search limit. Checking ten names
+    therefore costs nothing that the search itself needs.
+    """
+    good: list[str] = []
+    bad: list[str] = []
+
+    headers = {"Accept": "application/vnd.github+json"}
+    if settings.github_token:
+        headers["Authorization"] = f"Bearer {settings.github_token}"
+
+    for repo in repos:
+        name = repo.strip().strip("/")
+        if not name or name.count("/") != 1:
+            bad.append(f"{repo} (not in owner/name form)")
+            continue
+
+        try:
+            response = await client.get(
+                f"{REPO_URL}/{name}", headers=headers, follow_redirects=True
+            )
+        except Exception:
+            # Unreachable is not the same as wrong. Keep it and let the
+            # search decide.
+            good.append(name)
+            continue
+
+        if response.status_code == 200:
+            # Use the name GitHub gives back, which is the current one after
+            # any rename. Searching the old name returns nothing at all.
+            actual = response.json().get("full_name") or name
+            good.append(actual)
+            if actual.lower() != name.lower():
+                bad.append(f"{name} was renamed to {actual}")
+        elif response.status_code == 404:
+            bad.append(f"{name} does not exist")
+        else:
+            good.append(name)
+
+    return good, bad
+
+
+async def find_repos(
+    client: httpx.AsyncClient,
+    topic: str,
+    min_stars: int = 500,
+    limit: int = 12,
+) -> list[dict]:
+    """
+    Ask GitHub which repositories match a topic, most starred first.
+
+    The alternative is asking a model to recall repository names, which is
+    how `microsoft/DeepSpeed` and `haystack-ai/haystack` ended up in a plan:
+    one had moved organisation, the other never existed. GitHub knows what
+    exists today; the model knows what existed when it was trained.
+    """
+    headers = {"Accept": "application/vnd.github+json"}
+    if settings.github_token:
+        headers["Authorization"] = f"Bearer {settings.github_token}"
+
+    response = await client.get(
+        "https://api.github.com/search/repositories",
+        params={
+            "q": f"{topic} stars:>={min_stars}",
+            "sort": "stars",
+            "order": "desc",
+            "per_page": min(limit, 30),
+        },
+        headers=headers,
+    )
+    if response.status_code != 200:
+        return []
+
+    return [
+        {
+            "full_name": item["full_name"],
+            "description": (item.get("description") or "")[:160],
+            "stars": item.get("stargazers_count", 0),
+            "open_issues": item.get("open_issues_count", 0),
+        }
+        for item in response.json().get("items", [])
+    ]
+
+
+async def repos_by_hits(
+    phrases: list[str],
+    days: int = 180,
+    limit: int = 12,
+    min_stars: int = 500,
+    max_requests: int = 6,
+) -> list[tuple[str, int]]:
+    """
+    Find repositories by searching for the problem and counting who turns up.
+
+    Returns (repo, hits), most hits first.
+
+    ── Why not just ask GitHub for matching repositories ─────────────────
+
+    Because `find_repos` searches repository *names and descriptions*, and a
+    description is a marketing sentence about what a project is, not evidence
+    that anybody there has this problem. Ranking those by similarity to the
+    product reliably surfaces the big framework repos - they describe
+    themselves in the same vocabulary the product does - and reliably misses
+    the places the conversations actually happen. One real run picked
+    llama_index, langchain and claude-code that way, while the leads a person
+    found by hand were in open-webui, llama.cpp, LibreChat and vanna.
+
+    So this asks the opposite question. Run the phrase searches across the
+    whole of GitHub first, then count which repositories the matching posts
+    came from. A repository that produced eleven posts about this problem in
+    six months has demonstrated it, and no description had to be trusted.
+
+    Deliberately searches without a state filter and over a long window: this
+    is measuring where a topic lives, and a closed issue is evidence of that
+    just as much as an open one.
+    """
+    if not phrases:
+        return []
+
+    result = await search(
+        phrases,
+        days=days,
+        max_requests=max_requests,
+        state=None,
+        drop_bots=True,
+        # Both filters off on purpose. This is counting where a conversation
+        # happens, and an owner talking about the problem in their own repo
+        # is still proof that it is discussed there - even though they are
+        # not a lead themselves.
+        outsiders_only=False,
+        min_repo_stars=0,
+    )
+
+    hits: dict[str, int] = {}
+    for conversation in result.conversations:
+        if conversation.container:
+            hits[conversation.container] = hits.get(conversation.container, 0) + 1
+
+    #: One post proves nothing - every phrase has a long tail of one-offs
+    #: from repositories that mentioned it once in passing.
+    ranked = [(repo, n) for repo, n in hits.items() if n >= 2]
+    ranked.sort(key=lambda pair: (-pair[1], pair[0]))
+
+    if not ranked or min_stars <= 0:
+        return ranked[:limit]
+
+    async with httpx.AsyncClient(timeout=settings.http_timeout_seconds) as client:
+        stars = await repo_stars(client, [repo for repo, _ in ranked[: limit * 3]])
+
+    return [
+        (repo, n)
+        for repo, n in ranked
+        # Unknown (-1) is kept, as everywhere else: a failed lookup is not
+        # evidence of a small project.
+        if stars.get(repo, -1) < 0 or stars.get(repo, -1) >= min_stars
+    ][:limit]
 
 
 async def search(
@@ -220,47 +527,187 @@ async def search(
     max_requests: int = 10,
     drop_bots: bool = True,
     outsiders_only: bool = False,
+    state: str | None = "open",
+    min_repo_stars: int = 0,
 ) -> SearchResult:
     """
     Run every query and collect the results.
 
-    A failing query is noted and skipped rather than raised, so one bad
-    phrase does not cost the other nineteen.
+    Queries are paged **round robin**: page one of every query, then page two
+    of every query, and so on. Running them one at a time looks simpler and
+    is much worse - a phrase matching 90,000 issues will happily take ten
+    pages of a twenty request budget, all chosen by GitHub's idea of
+    relevance rather than ours, while the last three phrases never run at
+    all. When every phrase matches thousands, breadth beats depth.
+
+    A failing query is noted and dropped rather than raised, so one bad
+    phrase does not cost the others.
     """
-    queries = build_queries(phrases, repos, days, exclude)
     result = SearchResult()
     seen: set[str] = set()
 
     if not settings.github_token:
-        result.notes.append(
-            "No GITHUB_TOKEN set: 10 requests a minute instead of 30."
-        )
+        result.notes.append("No GITHUB_TOKEN set: 10 requests a minute instead of 30.")
+
+    async with httpx.AsyncClient(timeout=settings.http_timeout_seconds) as checker:
+        # Before spending any of the search budget. One bad name otherwise
+        # costs a request and returns a wall of GitHub's JSON instead of an
+        # explanation.
+        if repos:
+            repos, problems = await check_repos(checker, repos)
+            for problem in problems:
+                result.notes.append(f"  skipped {problem}")
+
+    queries = build_queries(phrases, repos, days, exclude, state)
+
+    #: label -> how many new conversations it contributed
+    found: dict[str, int] = {label: 0 for label, _ in queries}
+    #: Queries with nothing left to give, or that failed.
+    done: set[str] = set()
+    stopped_early = False
 
     async with httpx.AsyncClient(timeout=settings.http_timeout_seconds) as client:
-        for label, query in queries:
-            if result.requests_made >= max_requests:
-                result.notes.append(f"Stopped at the {max_requests} request limit.")
+        page = 1
+        while page * PER_PAGE <= HARD_RESULT_CAP and len(done) < len(queries):
+            for label, query in queries:
+                if label in done:
+                    continue
+                if result.requests_made >= max_requests:
+                    stopped_early = True
+                    break
+
+                try:
+                    added, exhausted = await _fetch_page(
+                        client, query, page, result, seen
+                    )
+                except Exception as exc:
+                    log.warning("github.query_failed", label=label, error=str(exc))
+                    result.notes.append(f"{label} failed: {exc}")
+                    done.add(label)
+                    continue
+
+                found[label] += added
+                if exhausted:
+                    done.add(label)
+
+            if stopped_early:
                 break
-            try:
-                found = await _run_one(client, query, result, seen, max_requests)
-                result.notes.append(f"{label} -> {found}")
-                if found == 0 and label.startswith("phrase: "):
-                    hint = _why_nothing(label.removeprefix("phrase: "))
-                    if hint:
-                        result.notes.append(f"    {hint}")
-            except Exception as exc:
-                log.warning("github.query_failed", label=label, error=str(exc))
-                result.notes.append(f"{label} failed: {exc}")
+            page += 1
+
+    for label, _ in queries:
+        result.notes.append(f"{label} -> {found[label]}")
+        if found[label] == 0 and label.startswith("phrase: "):
+            hint = _why_nothing(label.removeprefix("phrase: "))
+            if hint:
+                result.notes.append(f"    {hint}")
+
+    if stopped_early:
+        left = len(queries) - len(done)
+        result.notes.append(
+            f"Stopped at the {max_requests} request limit with {left} "
+            f"quer{'y' if left == 1 else 'ies'} still having more to give. "
+            f"Fewer, narrower queries would go deeper."
+        )
 
     _apply_filters(result, drop_bots=drop_bots, outsiders_only=outsiders_only)
+
+    if min_repo_stars > 0:
+        async with httpx.AsyncClient(timeout=settings.http_timeout_seconds) as client:
+            await _drop_small_repos(client, result, min_repo_stars)
+
     return result
+
+
+async def _drop_small_repos(
+    client: httpx.AsyncClient, result: SearchResult, minimum: int
+) -> None:
+    """
+    Remove results from projects too small to be worth replying in.
+
+    Phrase searches cover the whole of GitHub, so they pull in one-person
+    side projects alongside the real ones. Commenting in a repository with
+    four stars reaches nobody: there is no audience reading it, and the
+    author is usually the only person who ever will.
+
+    Repository searches are unaffected in practice, because those are
+    projects somebody chose deliberately.
+    """
+    names = sorted({c.container for c in result.conversations if c.container})
+    if not names:
+        return
+
+    stars = await repo_stars(client, names)
+
+    kept: list[Conversation] = []
+    dropped = 0
+    for conversation in result.conversations:
+        count = stars.get(conversation.container or "", -1)
+        # Unknown stays. A lookup that failed is not evidence of a small
+        # project, and silently discarding on a network hiccup is worse than
+        # showing one extra result.
+        if count >= 0 and count < minimum:
+            dropped += 1
+            continue
+        kept.append(conversation)
+
+    if dropped:
+        result.notes.append(
+            f"dropped {dropped} from repositories under {minimum:,} stars"
+        )
+    result.conversations = kept
+
+
+async def _fetch_page(
+    client: httpx.AsyncClient,
+    query: str,
+    page: int,
+    result: SearchResult,
+    seen: set[str],
+) -> tuple[int, bool]:
+    """
+    One page of one query. Returns (new conversations, nothing left).
+
+    "Nothing left" means a short page - GitHub gave us fewer than it could,
+    so there is no point asking for the next one.
+    """
+    payload = await _get(client, {"q": query, "per_page": PER_PAGE, "page": page})
+    result.requests_made += 1
+
+    items = payload.get("items") or []
+    if not items:
+        return 0, True
+
+    total = int(payload.get("total_count") or 0)
+    if page == 1 and total > HARD_RESULT_CAP:
+        # Say so rather than letting a run silently see a fraction of what
+        # matched. The fix is a narrower phrase, not more pages.
+        result.notes.append(
+            f"  matched {total:,} but GitHub serves at most {HARD_RESULT_CAP} "
+            f"- this phrase is too broad to be precise"
+        )
+
+    added = 0
+    for item in items:
+        if "pull_request" in item:
+            continue
+        conversation = to_conversation(item)
+        if conversation is None:
+            continue
+        key = f"{conversation.source}:{conversation.source_id}"
+        if key in seen:
+            continue
+        seen.add(key)
+        result.conversations.append(conversation)
+        added += 1
+
+    return added, len(items) < PER_PAGE
 
 
 def _why_nothing(phrase: str) -> str | None:
     """
     Explain an empty phrase query, because the reason is never obvious.
 
-    A multi-word phrase is searched as an exact quoted string. That works for
+    A plain phrase is searched as an exact quoted string. That works for
     terms of art - "stale embeddings" is a fixed compound people reuse
     verbatim - and fails completely for anything sentence-shaped, because
     nobody writes the same sentence twice.
@@ -269,6 +716,16 @@ def _why_nothing(phrase: str) -> str | None:
     just belongs in the `product` text, where the embedding matches meaning,
     not here, where GitHub matches characters.
     """
+    sides = [s.strip() for s in phrase.split(INTERSECT) if s.strip()]
+
+    # An intersection that matches nothing is over-narrow, not over-long -
+    # the opposite problem, and the opposite advice.
+    if len(sides) > 1:
+        return (
+            f"both halves had to appear in the same post and none did. Try "
+            f"dropping one side, or widening it to just \"{sides[0]}\"."
+        )
+
     words = phrase.split()
     if len(words) >= 4:
         return (
@@ -299,7 +756,7 @@ def _apply_filters(
         if drop_bots and conversation.author_is_bot:
             dropped_bots += 1
             continue
-        if outsiders_only and conversation.author_association not in OUTSIDER:
+        if outsiders_only and conversation.author_association in INSIDER:
             dropped_insiders += 1
             continue
         kept.append(conversation)
@@ -309,7 +766,7 @@ def _apply_filters(
     if dropped_insiders:
         result.notes.append(
             f"dropped {dropped_insiders} written by people who work on that repo "
-            f"(owner, member, collaborator or past contributor)"
+            f"(owner, member or collaborator)"
         )
 
     result.conversations = kept
@@ -383,8 +840,18 @@ async def _get(client: httpx.AsyncClient, params: dict) -> dict:
     if settings.github_token:
         headers["Authorization"] = f"Bearer {settings.github_token}"
 
-    for _ in range(3):
-        response = await client.get(SEARCH_URL, params=params, headers=headers)
+    for attempt in range(3):
+        try:
+            response = await client.get(SEARCH_URL, params=params, headers=headers)
+        except (httpx.TransportError, httpx.RemoteProtocolError) as exc:
+            # A dropped connection is not an answer. Without this, one
+            # network hiccup ends a query permanently and quietly costs the
+            # run several hundred results.
+            if attempt == 2:
+                raise RuntimeError(f"GitHub connection failed: {exc}") from exc
+            log.info("github.retrying", attempt=attempt, error=str(exc))
+            await asyncio.sleep(1.5 * (attempt + 1))
+            continue
 
         if response.status_code == 200:
             return response.json()

@@ -8,6 +8,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field
 
 from outreach.db.models.product import CrawlMode, CrawlState
+from outreach.planner import MarketingPlan
 
 
 class ProductCreate(BaseModel):
@@ -80,3 +81,17 @@ class ProductOut(BaseModel):
 
 class ProductDetail(ProductOut):
     pages: list[ProductPageOut] = []
+
+
+class PlanOut(BaseModel):
+    """
+    The marketing plan, plus whether it still matches the product.
+
+    `stale` is shown rather than acted on: silently rewriting a plan because
+    the goal changed would replace something the user may have been working
+    from, and costs money without being asked.
+    """
+
+    plan: MarketingPlan
+    stale: bool = False
+    made_at: datetime | None = None

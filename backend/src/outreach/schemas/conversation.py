@@ -18,6 +18,17 @@ class Conversation(BaseModel):
     source: str
     """"github", "hackernews", ..."""
 
+    kind: str = "issue"
+    """
+    Which kind of thing this is within its source: "issue" or "discussion".
+
+    Not folded into `source`, because everything downstream - dedup, the
+    star filter, the insider filter, scoring - treats GitHub as one place and
+    should keep doing so. This only exists because replying is different:
+    an issue reply is a bug-tracker comment, a discussion reply is a forum
+    answer, and the user needs to know which they are about to write.
+    """
+
     source_id: str
     """Stable id within the source. Together with `source`, the identity."""
 
@@ -52,6 +63,24 @@ class Conversation(BaseModel):
 
     labels: list[str] = []
 
+    category: str | None = None
+    """
+    A GitHub Discussion's category: "Q&A", "Ideas", "Show and tell", ...
+
+    The single cheapest quality signal this codebase gets for free. "Q&A" is
+    somebody with a question; "Show and tell" is somebody announcing. Issues
+    have no equivalent, so this is None for them.
+    """
+
+    is_answered: bool | None = None
+    """
+    Has a discussion been marked answered? None when it cannot be - issues,
+    and discussion categories that are not Q&A.
+
+    An unanswered question is the better outreach target of the two: there is
+    a gap to fill rather than a resolved thread to arrive late to.
+    """
+
     # ---- computed, not from the source ----------------------------------
 
     relevance: float | None = None
@@ -67,8 +96,8 @@ class Conversation(BaseModel):
     # ---- from the classifier (stage 5) ----------------------------------
 
     intent: str | None = None
-    """SOLUTION_SEEKING, COMPARISON, PROBLEM, BUILDING, SUPPORT,
-    ANNOUNCEMENT or IRRELEVANT."""
+    """SOLUTION_SEEKING, COMPARISON, DIY_WORKAROUND, PROBLEM, SUPPORT,
+    BUILDING, ANNOUNCEMENT or IRRELEVANT."""
 
     pain_point: str | None = None
     evidence_quote: str | None = None
@@ -82,20 +111,26 @@ class Conversation(BaseModel):
     "C++ code indexing", "LLM vector retrieval". Shown so a wrong domain
     judgement is visible rather than buried inside a score."""
 
-    same_domain: bool = False
+    domain_match: str = "different"
     """
-    Is this the same kind of system the product is for?
+    How close the post's domain is to the product's: same, adjacent or
+    different.
 
     Staleness, invalidation and expensive reindexing look identical in code
-    indexers, databases, search engines and CI caches. Structural similarity
-    is not a market, so this is a hard gate rather than a penalty.
+    indexers, databases, search engines and CI caches, so this has to be
+    asked. It used to be a hard gate and zeroed anything but an exact match,
+    which threw away the next room over - people running local inference,
+    say - to catch the genuinely unrelated. Now it scales the fit instead.
     """
+
+    same_domain: bool = False
+    """Convenience for display: `domain_match == "same"`."""
 
     fit: str | None = None
     """strong, possible, weak or none."""
 
     product_fit: float | None = None
-    """0-1, derived from `fit` and gated by `same_domain`."""
+    """0-1: the judged fit, scaled by how close `domain_match` is."""
 
     reason: str | None = None
 

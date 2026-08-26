@@ -196,6 +196,14 @@ async def run_crawl(product_id: uuid.UUID) -> None:
         product.profile_source_hash = source_hash
         log.info("profile.saved", product_id=str(product_id), domain=extracted.domain)
 
+    # The whole chain runs off one button: read the site, understand it, then
+    # write the marketing plan. Imported here rather than at module level
+    # because plan_service imports the planner, which imports this module's
+    # settings - a circular import at load time otherwise.
+    from outreach.services import plan_service
+
+    await plan_service.ensure_plan(product_id)
+
 
 def is_stale(product: Product) -> bool:
     """

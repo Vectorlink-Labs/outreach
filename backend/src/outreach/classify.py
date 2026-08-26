@@ -38,7 +38,7 @@ CHAT_URL = "https://api.openai.com/v1/chat/completions"
 PROMPT_PATH = Path(__file__).parent / "llm" / "prompts" / "classify.v1.md"
 #: Part of the cache key. Bump it whenever the prompt changes, so old
 #: judgements are discarded instead of silently reused against a new rubric.
-PROMPT_VERSION = "classify.v4"
+PROMPT_VERSION = "classify.v5"
 
 #: Enough of a post to judge intent. Bodies run to thousands of words of
 #: stack traces; the first part carries the intent.
@@ -62,6 +62,37 @@ FIT_VALUE = {
     "none": 0.0,
 }
 
+#: How much a domain mismatch costs.
+#:
+#: This was a hard gate - anything but an exact domain match scored zero -
+#: and it was too blunt. The gate exists for a real reason: staleness,
+#: invalidation and expensive rebuilds look identical in code indexers,
+#: databases, search engines and CI caches, and structural similarity is not
+#: a market. A C++ language server reindexing after a header change must not
+#: score as a lead.
+#:
+#: But "different domain" was doing two jobs at once. A post about KV-cache
+#: reuse in a local inference server is not the same domain as a context
+#: cache for agents, and it is not a C++ language server either - it is the
+#: next room over, full of exactly the right people. Zeroing both equally
+#: threw away real leads to catch fake ones.
+#:
+#: Three levels rather than two, so `adjacent` survives at a penalty and
+#: `different` still dies.
+#: `adjacent` was 0.35 and that was still too harsh. Measured against a real
+#: run: a strong fit in an adjacent domain came out at 0.32, which after the
+#: rest of the arithmetic capped the best result on the page at 39 - below the
+#: threshold where the UI stops calling it mediocre. The model was doing its
+#: job and the number was throwing the answer away.
+#:
+#: 0.55 is set so that a `strong` fit one room over lands in the high band
+#: rather than the middle of it, while `same` still clearly outranks it.
+DOMAIN_MULTIPLIER = {
+    "same": 1.00,
+    "adjacent": 0.55,
+    "different": 0.10,
+}
+
 
 class Analysis(BaseModel):
     intent: str = "IRRELEVANT"
@@ -74,23 +105,21 @@ class Analysis(BaseModel):
     #: and "LLM vector retrieval" and then call them the same thing.
     post_domain: str = ""
     product_domain: str = ""
-    same_domain: bool = False
+    domain_match: str = "different"
     fit: str = "none"
     reason: str = ""
 
     @property
-    def product_fit(self) -> float:
-        """
-        0-1, for scoring.
+    def same_domain(self) -> bool:
+        """Kept for display and for everything downstream that reads a bool."""
+        return self.domain_match.lower().strip() == "same"
 
-        The domain check is a hard gate rather than a penalty. A C++ language
-        server rebuilding its symbol index is a perfect structural match for
-        this problem and a completely different market, so it must score zero
-        rather than merely less.
-        """
-        if not self.same_domain:
-            return 0.0
-        return FIT_VALUE.get(self.fit.lower().strip(), 0.0)
+    @property
+    def product_fit(self) -> float:
+        """0-1, for scoring. Fit as judged, scaled by how close the domain is."""
+        fit = FIT_VALUE.get(self.fit.lower().strip(), 0.0)
+        domain = DOMAIN_MULTIPLIER.get(self.domain_match.lower().strip(), 0.10)
+        return fit * domain
 
 
 class ClassifyError(Exception):
@@ -246,6 +275,7 @@ def _attach(conversation: Conversation, analysis: Analysis) -> None:
     conversation.evidence_quote = analysis.evidence_quote or None
     conversation.asking_for_help = analysis.asking_for_help
     conversation.post_domain = analysis.post_domain or None
+    conversation.domain_match = analysis.domain_match
     conversation.same_domain = analysis.same_domain
     conversation.fit = analysis.fit
     conversation.product_fit = analysis.product_fit

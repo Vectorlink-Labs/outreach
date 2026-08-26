@@ -9,8 +9,8 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Response, status
 from outreach.api.deps import CurrentUser, DbSession
 from outreach.db.models.product import CrawlState
 from outreach.db.repositories import products as repo
-from outreach.schemas.product import ProductCreate, ProductDetail, ProductOut
-from outreach.services import product_service
+from outreach.schemas.product import PlanOut, ProductCreate, ProductDetail, ProductOut
+from outreach.services import plan_service, product_service
 
 router = APIRouter(prefix="/products", tags=["products"])
 
@@ -50,6 +50,63 @@ async def create_product(
         response.status_code = status.HTTP_200_OK
 
     return ProductOut.model_validate(product)
+
+
+@router.get("/{product_id}/plan", response_model=PlanOut)
+async def get_plan(
+    product_id: uuid.UUID, user: CurrentUser, session: DbSession
+) -> PlanOut:
+    """
+    The marketing plan for this product.
+
+    **404** when there is none yet. The crawl has to finish first, because a
+    plan written before the website has been read is generic advice.
+    """
+    product = await repo.get_owned(session, product_id, user.id)
+    if product is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, NOT_FOUND)
+
+    plan = plan_service.current_plan(product)
+    if plan is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            "No plan yet. Generate one once the website has been read.",
+        )
+
+    return PlanOut(
+        plan=plan,
+        stale=plan_service.is_stale(product),
+        made_at=product.plan_made_at,
+    )
+
+
+@router.post("/{product_id}/plan", status_code=status.HTTP_202_ACCEPTED)
+async def make_plan(
+    product_id: uuid.UUID,
+    user: CurrentUser,
+    session: DbSession,
+    background: BackgroundTasks,
+    force: bool = False,
+) -> dict[str, str]:
+    """
+    Write the marketing plan. Returns immediately; poll GET for the result.
+
+    Takes 20 to 40 seconds because it is a large model writing several
+    paragraphs. Nothing happens if a current plan already exists, unless
+    `force=true`.
+    """
+    product = await repo.get_owned(session, product_id, user.id)
+    if product is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, NOT_FOUND)
+
+    if product.state == CrawlState.CRAWLING:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Still reading the website. Try again when it has finished.",
+        )
+
+    background.add_task(plan_service.ensure_plan, product.id, force)
+    return {"status": "writing"}
 
 
 @router.get("", response_model=list[ProductOut])

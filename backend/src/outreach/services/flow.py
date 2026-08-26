@@ -21,6 +21,7 @@ from datetime import UTC, datetime, timedelta
 import structlog
 
 from outreach import classify, expand, rank, score
+from outreach.config import settings
 from outreach.connectors import github
 from outreach.schemas.conversation import Conversation
 from outreach.schemas.web import (
@@ -263,7 +264,7 @@ async def execute(run_id: str) -> None:
             [t.term for t in plan["terms"]],
             days=brief["days_back"],
             max_requests=CALL_BUDGET,
-            outsiders_only=True,
+            outsiders_only=settings.outsiders_only,
         )
         run["calls_used"] = result.requests_made
         _mark(run, "fetch", "done", f"{len(result.conversations)} found")

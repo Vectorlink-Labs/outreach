@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 
-from outreach import classify, rank, score
-from outreach.connectors import github
+from outreach import classify, dedupe, rank, score
+from outreach.connectors import github, github_discussions
 from outreach.schemas.conversation import Conversation
 
 router = APIRouter(prefix="/sources", tags=["sources"])
@@ -16,13 +18,14 @@ class GitHubSearch(BaseModel):
     phrases: list[str] = Field(
         default_factory=list,
         description=(
-            "SHORT fragments, 1-3 words. Each is searched as an exact quoted "
-            "string, so anything sentence-shaped matches nothing at all. "
-            "Cast wide here and let `product` do the discriminating - the "
-            "embedding stage cannot rank what the fetch never returned."
+            "SHORT fragments, 1-3 words, searched as exact quoted strings - "
+            "anything sentence-shaped matches nothing at all. Use ' + ' to "
+            "intersect two concepts instead: 'prompt caching + RAG' means "
+            "both must appear anywhere in the post, which is far more "
+            "precise than either alone and is where the good results are."
         ),
         examples=[
-            ["re-embed", "embedding cost", "stale index", "vector store"]
+            ["prompt caching + RAG", "stale index", "re-embed + cost"]
         ],
     )
     repos: list[str] = Field(
@@ -36,6 +39,14 @@ class GitHubSearch(BaseModel):
     exclude: list[str] = Field(default_factory=list, max_length=3)
     days: int = Field(default=30, ge=1, le=365)
     max_requests: int = Field(default=10, ge=1, le=60)
+    min_repo_stars: int = Field(
+        default=500,
+        ge=0,
+        description=(
+            "Ignore issues in projects smaller than this. Commenting in a "
+            "four-star repository reaches nobody. 0 turns it off."
+        ),
+    )
 
     product: str = Field(
         default="",
@@ -52,6 +63,17 @@ class GitHubSearch(BaseModel):
         ],
     )
 
+    include_discussions: bool = Field(
+        default=True,
+        description=(
+            "Also search GitHub Discussions, which the issue search cannot "
+            "see at all - they are absent from /search/issues rather than "
+            "ranked low. Needs a GITHUB_TOKEN, because the GraphQL API "
+            "refuses anonymous requests. Discussions skew towards 'how do "
+            "people solve this?' where issues skew towards 'here is my "
+            "patch', so this is usually where the leads are."
+        ),
+    )
     drop_bots: bool = Field(
         default=True,
         description="Remove dependabot, renovate and friends. Almost always wanted.",
@@ -59,21 +81,25 @@ class GitHubSearch(BaseModel):
     outsiders_only: bool = Field(
         default=False,
         description=(
-            "Keep only authors with no history in that repository at all "
-            "(author_association == NONE). Owners, members, collaborators and "
-            "past contributors are all working on the project rather than "
-            "shopping for tools. This is the single most effective filter "
-            "available - it removed roughly 60% of one test corpus."
+            "Drop authors who work on the repository they posted in - "
+            "owners, members and collaborators, who are writing tickets in "
+            "their own project. Past contributors are KEPT: a merged pull "
+            "request usually means they fixed a typo once, and the engaged "
+            "power user filing a thoughtful feature request is exactly who "
+            "we want."
         ),
     )
 
     classify: int = Field(
-        default=25,
+        default=140,
         ge=0,
-        le=100,
+        le=300,
         description=(
             "How many of the best-ranked results get read by the LLM. Costs "
-            "roughly $0.0001 each. 0 skips classification and scoring."
+            "roughly $0.0002 each, and repeats are cached. Keep this high: "
+            "embeddings sort by topic and everything fetched is on-topic, so "
+            "the classifier is the only stage that separates a lead from a "
+            "post about the same subject. 0 skips classification and scoring."
         ),
     )
     show: int = Field(default=20, ge=1, le=100, description="Results to return.")
@@ -89,11 +115,10 @@ class GitHubSearchOut(BaseModel):
 @router.post("/github/search", response_model=GitHubSearchOut)
 async def github_search(payload: GitHubSearch) -> GitHubSearchOut:
     """
-    Search GitHub issues. Pull requests are excluded.
+    Search GitHub issues and, unless turned off, Discussions. PRs excluded.
 
-    Results are ordered by how much discussion they attracted. That is not
-    ranking - the scorer does not exist yet - it just makes the output
-    readable.
+    The two run concurrently against different rate limits, so adding
+    discussions costs the request almost no extra time.
     """
     if not payload.phrases and not payload.repos:
         raise HTTPException(
@@ -101,15 +126,47 @@ async def github_search(payload: GitHubSearch) -> GitHubSearchOut:
             "Give at least one phrase or one repository.",
         )
 
-    result = await github.search(
-        payload.phrases,
-        repos=payload.repos,
-        days=payload.days,
-        exclude=payload.exclude,
-        max_requests=payload.max_requests,
-        drop_bots=payload.drop_bots,
-        outsiders_only=payload.outsiders_only,
-    )
+    async def issues() -> github.SearchResult:
+        return await github.search(
+            payload.phrases,
+            repos=payload.repos,
+            days=payload.days,
+            exclude=payload.exclude,
+            max_requests=payload.max_requests,
+            drop_bots=payload.drop_bots,
+            outsiders_only=payload.outsiders_only,
+            min_repo_stars=payload.min_repo_stars,
+        )
+
+    async def discussions() -> github.SearchResult:
+        if not payload.include_discussions:
+            return github.SearchResult()
+        try:
+            return await github_discussions.search(
+                payload.phrases,
+                repos=payload.repos,
+                days=payload.days,
+                exclude=payload.exclude,
+                max_requests=payload.max_requests,
+                drop_bots=payload.drop_bots,
+                outsiders_only=payload.outsiders_only,
+                min_repo_stars=payload.min_repo_stars,
+            )
+        except Exception as exc:
+            # This endpoint exists to show what a connector returns, so a
+            # half answer with the reason attached beats a 500.
+            return github.SearchResult(
+                notes=[f"discussions unavailable: {str(exc)[:200]}"]
+            )
+
+    result, extra = await asyncio.gather(issues(), discussions())
+    result.conversations.extend(extra.conversations)
+    result.requests_made += extra.requests_made
+    result.notes.extend(extra.notes)
+
+    result.conversations, duplicates = dedupe.collapse(result.conversations)
+    if duplicates:
+        result.notes.append(f"collapsed {duplicates} repeats of the same post")
 
     conversations = result.conversations
 
@@ -202,9 +259,43 @@ def _by_attention(conversations: list[Conversation]) -> list[Conversation]:
     return sorted(conversations, key=lambda c: c.comments * 2 + c.score, reverse=True)
 
 
+@router.get("/github/repos")
+async def suggest_repos(q: str, min_stars: int = 500, limit: int = 12) -> list[dict]:
+    """
+    Repositories GitHub actually has, for a topic.
+
+    Here because asking a model to recall repository names produces plausible
+    wrong ones: renamed projects, wrong organisations, names that never
+    existed. GitHub knows what exists today.
+    """
+    import httpx
+
+    from outreach.config import settings as s
+
+    async with httpx.AsyncClient(timeout=s.http_timeout_seconds) as client:
+        return await github.find_repos(client, q, min_stars=min_stars, limit=limit)
+
+
 @router.post("/github/queries", response_model=list[str])
 async def github_queries(payload: GitHubSearch) -> list[str]:
-    """Show the queries without running them. Free, instant, hits nothing."""
-    return [q for _, q in github.build_queries(
-        payload.phrases, payload.repos, payload.days, payload.exclude
-    )]
+    """
+    Show the queries without running them. Free, instant, hits nothing.
+
+    Both sets, labelled, because they are not the same string: the discussion
+    search drops `is:issue` and `is:open`, and seeing that side by side is
+    the quickest way to understand why one finds things the other cannot.
+    """
+    out = [
+        f"issues     {q}"
+        for _, q in github.build_queries(
+            payload.phrases, payload.repos, payload.days, payload.exclude
+        )
+    ]
+    if payload.include_discussions:
+        out += [
+            f"discussion {q}"
+            for _, q in github_discussions.build_queries(
+                payload.phrases, payload.repos, payload.days, payload.exclude
+            )
+        ]
+    return out

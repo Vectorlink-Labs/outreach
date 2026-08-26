@@ -31,9 +31,28 @@ from outreach.schemas.conversation import Conversation
 #: How much each intent is worth as a lead. These are the most opinionated
 #: numbers in the system and the first thing to tune once real leads have
 #: been marked good or bad by a person.
+#:
+#: ── Why DIY_WORKAROUND scores near the top ───────────────────────────────
+#:
+#: It used to be folded into BUILDING at 0.10, on the reasoning that somebody
+#: writing code is not shopping. For a product with switching costs that is
+#: right. For a library it is backwards, and it was burying the best leads we
+#: had: every one of the five best opportunities found by hand in a real run
+#: was somebody hand-rolling context caching inside their own app.
+#:
+#: Think about what that person has already done for you. They hit the
+#: problem, went looking, found nothing that solved it, and decided to spend
+#: two weeks building it themselves. There is no qualification step left.
+#: They are strictly further along than someone still asking what to do.
+#:
+#: The distinction that matters is not "writing code or not" - it is whether
+#: they would *buy* this or *sell* something like it. Someone building a
+#: workaround inside their own product is the first; someone building a
+#: competing library is the second, and stays at BUILDING.
 INTENT_WEIGHT = {
     "SOLUTION_SEEKING": 1.00,
     "COMPARISON": 0.90,
+    "DIY_WORKAROUND": 0.85,
     "PROBLEM": 0.55,
     "SUPPORT": 0.15,
     "BUILDING": 0.10,
@@ -73,12 +92,31 @@ def opportunity_score(conversation: Conversation, now: datetime | None = None) -
     return round(100 * match * intent * modifier)
 
 
+#: Where the bands sit, and why they are not round numbers.
+#:
+#: These were set when scoring was additive, and never moved when it became
+#: multiplicative. Two gates multiplying means real leads land far lower than
+#: they used to: a genuinely good post scores in the forties, not the
+#: seventies, because `match` is realistically around 0.6 rather than 1.0.
+#:
+#: Left alone, the thresholds quietly libelled the results. A whole page of
+#: usable leads came back labelled "medium" with the best at 39, which reads
+#: as "nothing here" to the person deciding whether to open any of them.
+#:
+#: Calibrated against a real run: a strong fit in an adjacent domain now
+#: scores around 49 and reads `high`; a strong fit in the same domain can
+#: reach the seventies and reads `very-high`.
+VERY_HIGH = 65
+HIGH = 40
+MEDIUM = 20
+
+
 def band(score: int) -> str:
-    if score >= 70:
+    if score >= VERY_HIGH:
         return "very-high"
-    if score >= 45:
+    if score >= HIGH:
         return "high"
-    if score >= 25:
+    if score >= MEDIUM:
         return "medium"
     return "weak"
 

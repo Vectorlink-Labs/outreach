@@ -1,0 +1,440 @@
+"""
+Run one platform's search for one product, using the plan's own terms.
+
+This is the join between the two halves of the product. The planner decided
+what to look for; this executes it and scores what comes back. The user never
+types a keyword.
+
+Runs are held in memory, like the rest of the run machinery. Same trade, same
+consequence: a restart loses them.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import uuid
+from datetime import UTC, datetime
+
+import structlog
+
+from outreach import classify, dedupe, rank, score
+from outreach.config import settings
+from outreach.connectors import github, github_discussions
+from outreach.db.models.product import Product
+from outreach.db.repositories import products as repo
+from outreach.db.session import session_scope
+from outreach.planner import MarketingPlan
+from outreach.profile import Profile
+from outreach.schemas.conversation import Conversation
+from outreach.services import plan_service
+
+log = structlog.get_logger(__name__)
+
+RUNS: dict[str, dict] = {}
+
+STAGES = [
+    ("fetch", "Searching GitHub issues and discussions"),
+    ("filter", "Removing bots and project insiders"),
+    ("rank", "Reading for meaning"),
+    ("judge", "Judging who actually needs this"),
+    ("score", "Scoring opportunities"),
+]
+
+#: Pages we want each query to get before the budget runs out.
+#:
+#: Two is the useful number: page one is whatever GitHub thinks is most
+#: relevant, page two is the rest of the recent activity, and page three is
+#: usually older and thinner. Better to spend the third page on another
+#: repository than on the same one.
+PAGES_PER_QUERY = 2
+
+#: Floor and ceiling on the request budget.
+#:
+#: The ceiling matters: GitHub allows 30 searches a minute, so 60 requests is
+#: already a two minute run, and nobody watches a progress bar for longer
+#: than that.
+MIN_REQUESTS = 15
+MAX_REQUESTS = 60
+
+#: Below this many queries, the run says so rather than letting the user read
+#: a starved search as a verdict on their market.
+THIN_PLAN = 10
+
+#: The discussion search gets its own budget rather than a slice of the one
+#: above.
+#:
+#: They are not competing for the same thing. Issue search is REST and spends
+#: from 30 requests a minute; discussion search is GraphQL and spends from
+#: 5,000 points an hour, of which one page of ours costs about nine. Taking
+#: discussion pages out of the issue budget would slow the issue search down
+#: to pay a bill it was never charged.
+#:
+#: So the real constraint here is wall clock, not quota, and the two searches
+#: run concurrently - which is why this number is sized to finish inside the
+#: issue search rather than to exhaust anything.
+MAX_DISCUSSION_REQUESTS = 30
+
+#: Roughly what rewriting the plan spends from the issue-search rate limit.
+#:
+#: Rewriting a plan is not free in the currency the search needs. Repository
+#: discovery counts hits across several phrase searches, and the fallback
+#: asks `/search/repositories` a few more times - all of it on the same 30
+#: requests a minute the search itself lives on.
+#:
+#: Left unaccounted, the run spent that quota, then started a 60 request
+#: search into a rate limit it had already half-consumed, and paid for it in
+#: minutes of backoff. Subtracting it up front costs a couple of pages and
+#: keeps the run inside its limit.
+REPLAN_REQUEST_COST = 12
+
+#: How many of the best-ranked results get read by the model.
+#:
+#: Was 25, and 25 was the bottleneck in the whole pipeline. A run fetches on
+#: the order of a thousand candidates, ranks them by embedding similarity
+#: against a paragraph describing the product, and used to read the top
+#: twenty-five. But embeddings sort by *topic*, and every post in the fetch
+#: is on the topic - that is why it was fetched. "RAG retrieval breaks my
+#: prompt cache" and two hundred generic posts about caching land within a
+#: few points of each other, so the lead we wanted sat somewhere around rank
+#: seventy and was never read at all.
+#:
+#: The classifier is the only stage that can tell those apart, and it costs
+#: about $0.0002 a post. Reading 140 instead of 25 costs roughly three cents
+#: a run, and most of them come back from the cache anyway.
+CLASSIFY_TOP = 10
+
+
+def _budget(terms: list[str], repos: list[str]) -> int:
+    """
+    Scale the request budget to how much there is to search.
+
+    A fixed budget was fine with four queries and starves at fourteen: every
+    query gets one page, and the run sees the first hundred results of each
+    rather than the best few hundred overall. Better repositories made the
+    budget the bottleneck rather than the search.
+    """
+    queries = len(terms) + len(repos)
+    return max(MIN_REQUESTS, min(MAX_REQUESTS, queries * PAGES_PER_QUERY))
+
+
+class OpportunityError(Exception):
+    """Something the user needs to know about, phrased for a person."""
+
+
+def start(
+    product_id: uuid.UUID,
+    platform: str,
+    terms: list[str] | None = None,
+    repos: list[str] | None = None,
+) -> str:
+    """Register a run. `terms` and `repos` override what the plan chose."""
+    run_id = uuid.uuid4().hex[:12]
+    RUNS[run_id] = {
+        "id": run_id,
+        "product_id": str(product_id),
+        "platform": platform,
+        "terms": terms,
+        "repos": repos,
+        "state": "queued",
+        "stages": [{"id": s, "label": label, "state": "waiting", "detail": None}
+                   for s, label in STAGES],
+        "percent": 0,
+        "notes": [],
+        "results": [],
+        "error": None,
+        "started_at": datetime.now(UTC).isoformat(),
+    }
+    return run_id
+
+
+def get(run_id: str) -> dict:
+    run = RUNS.get(run_id)
+    if run is None:
+        raise OpportunityError("No run with that id. It may have been lost on a restart.")
+    return run
+
+
+async def execute(run_id: str) -> None:
+    """The background job. Every exit path writes a final state."""
+    run = RUNS[run_id]
+    run["state"] = "running"
+
+    product_id = uuid.UUID(run["product_id"])
+
+    try:
+        # Rewrite the plan first if it has gone out of date.
+        #
+        # `is_stale` has always known the answer; nothing on this path ever
+        # asked it. A plan was only rewritten when somebody opened the plan
+        # page or re-crawled the site, so a search would happily run terms
+        # written against a rubric two versions old - and did. Every
+        # improvement to the planner reached new products only, while
+        # existing ones searched the same words forever and looked, from the
+        # results, as though nothing had changed at all.
+        async with session_scope() as session:
+            product = await repo.get(session, product_id)
+            if product is None:
+                raise OpportunityError("That product no longer exists.")
+            stale = plan_service.is_stale(product)
+
+        replanned = False
+        if stale:
+            run["notes"].append("plan was out of date - rewriting it before searching")
+            try:
+                await plan_service.ensure_plan(product_id)
+                replanned = True
+            except Exception as exc:
+                # An old plan still searches. Failing to improve it must not
+                # cost the run.
+                log.warning("opportunity.replan_failed", error=str(exc))
+                run["notes"].append(f"could not rewrite the plan: {str(exc)[:150]}")
+
+        async with session_scope() as session:
+            product = await repo.get(session, product_id)
+            if product is None:
+                raise OpportunityError("That product no longer exists.")
+            terms, places = _terms_for(product, run["platform"])
+            # A caller-supplied list wins outright, including an empty
+            # one: "search no phrases, only these repositories" is a
+            # deliberate and useful thing to ask for.
+            if run["terms"] is not None:
+                terms = run["terms"]
+            if run["repos"] is not None:
+                places = run["repos"]
+            target = _target_text(product)
+
+        if not terms and not places:
+            raise OpportunityError(
+                "The plan has no search terms for this platform. Rewrite the plan."
+            )
+
+        budget = _budget(terms, places)
+        if replanned:
+            budget = max(MIN_REQUESTS, budget - REPLAN_REQUEST_COST)
+
+        run["notes"].append(
+            f"searching {len(terms)} phrases + {len(places)} repositories "
+            f"with {budget} requests"
+            + (f" ({REPLAN_REQUEST_COST} kept back for the replan)" if replanned else "")
+        )
+
+        # Say so when the plan is thin, rather than letting a starved run look
+        # like an empty market. A run that fetches nothing because it barely
+        # searched is the single most confusing outcome this thing produces:
+        # the numbers all look valid and the conclusion drawn is "there is
+        # nobody out there", which is the opposite of what happened.
+        if len(terms) + len(places) < THIN_PLAN:
+            run["notes"].append(
+                f"this plan is thin - {len(terms)} phrases and {len(places)} "
+                f"repositories is little to search. Few results here mean a "
+                f"narrow plan, not an empty market. Rewrite the plan, or add "
+                f"repositories to sweep."
+            )
+
+        _mark(run, "fetch", "running")
+
+        # Concurrently, because they queue on different rate limits - REST
+        # search on 30 a minute, GraphQL on 5,000 points an hour. Run in
+        # sequence the discussion search would add its whole duration to the
+        # run for no reason; run together it is effectively free.
+        issues, discussions = await asyncio.gather(
+            github.search(
+                terms,
+                repos=places,
+                days=90,
+                max_requests=budget,
+                outsiders_only=settings.outsiders_only,
+                min_repo_stars=settings.min_repo_stars,
+            ),
+            _discussions(terms, places, run),
+        )
+
+        run["notes"].extend(issues.notes)
+        run["notes"].extend(discussions.notes)
+
+        # Ids never collide between the two - an issue node id and a
+        # discussion node id come from the same global space - but the same
+        # *content* does turn up twice, and only a content check finds it.
+        conversations, duplicates = dedupe.collapse(
+            issues.conversations + discussions.conversations
+        )
+        if duplicates:
+            run["notes"].append(f"collapsed {duplicates} repeats of the same post")
+
+        _mark(
+            run,
+            "fetch",
+            "done",
+            f"{len(issues.conversations)} issues + "
+            f"{len(discussions.conversations)} discussions",
+        )
+        _mark(run, "filter", "done", "bots and insiders removed")
+
+        if not conversations:
+            _finish(run)
+            return
+
+        _mark(run, "rank", "running")
+        conversations = await rank.score_relevance(target, conversations)
+        _mark(run, "rank", "done", f"{len(conversations)} read")
+
+        ranked = len(conversations)
+        conversations = conversations[:CLASSIFY_TOP]
+
+        # The whole funnel on one line.
+        #
+        # Every number in a run is individually plausible while the shape of
+        # the run is badly wrong, and without this the only visible output is
+        # the final count - which reads as a verdict on the market rather than
+        # a description of how little was searched. One glance here says
+        # whether a small result set came from a small search or a small
+        # market.
+        run["notes"].append(
+            f"funnel: {len(issues.conversations)} issues + "
+            f"{len(discussions.conversations)} discussions "
+            f"-> {ranked} after duplicates -> {len(conversations)} classified"
+        )
+
+        _mark(run, "judge", "running")
+        conversations, notes = await classify.classify_all(target, conversations)
+        run["notes"].extend(notes)
+        _mark(run, "judge", "done", f"{len(conversations)} judged")
+
+        conversations = score.apply(conversations)
+        run["results"] = [_to_dict(c, i + 1) for i, c in enumerate(conversations)]
+        _mark(run, "score", "done", f"{len(conversations)} scored")
+
+        _finish(run)
+
+    except Exception as exc:
+        log.exception("opportunity.failed", run_id=run_id)
+        run["state"] = "failed"
+        run["error"] = str(exc)[:400]
+        for stage in run["stages"]:
+            if stage["state"] == "running":
+                stage["state"] = "skipped"
+
+
+# ---------------------------------------------------------------- internals
+
+
+async def _discussions(
+    terms: list[str], places: list[str], run: dict
+) -> github.SearchResult:
+    """
+    Search Discussions, degrading to nothing rather than failing the run.
+
+    Deliberately swallows everything. The issue search is the older half of
+    this pipeline and works on its own; losing the newer half to a missing
+    token or a GraphQL hiccup should cost the discussions, not the run. The
+    reason always lands in the notes, so a silent zero is still explained.
+    """
+    try:
+        return await github_discussions.search(
+            terms,
+            repos=places,
+            days=90,
+            max_requests=MAX_DISCUSSION_REQUESTS,
+            outsiders_only=settings.outsiders_only,
+            min_repo_stars=settings.min_repo_stars,
+        )
+    except github_discussions.DiscussionsUnavailable as exc:
+        log.warning("opportunity.discussions_unavailable", error=str(exc))
+        return github.SearchResult(notes=[f"Discussions not searched: {exc}"])
+    except Exception as exc:
+        log.exception("opportunity.discussions_failed")
+        return github.SearchResult(
+            notes=[f"Discussion search failed, issues only: {str(exc)[:200]}"]
+        )
+
+
+def _terms_for(product: Product, platform: str) -> tuple[list[str], list[str]]:
+    """
+    The plan's search terms for this platform.
+
+    Falls back to the profile's pain words when the plan has none. Those are
+    the phrases somebody with the problem types, which is exactly what a
+    keyword search needs, so an empty plan is recoverable rather than fatal.
+    """
+    if product.plan:
+        try:
+            plan = MarketingPlan(**product.plan)
+            for entry in plan.platforms:
+                if entry.key == platform:
+                    return list(entry.search_terms), list(entry.target_places)
+        except Exception:
+            log.warning("opportunity.plan_unreadable", product_id=str(product.id))
+
+    if product.profile:
+        try:
+            pain = Profile(**product.profile).pain_words
+            return pain[:8], []
+        except Exception:
+            pass
+
+    return [], []
+
+
+def _target_text(product: Product) -> str:
+    """What every result is matched and judged against."""
+    parts: list[str] = []
+    if product.profile:
+        # A profile written by an older version of the extractor may no
+        # longer parse. The description below is enough on its own.
+        with contextlib.suppress(Exception):
+            parts.append(Profile(**product.profile).as_search_text())
+    if product.description:
+        parts.append(product.description)
+    if product.goal:
+        parts.append(f"The goal of this search: {product.goal}")
+    return "\n\n".join(p for p in parts if p) or product.name
+
+
+def _to_dict(c: Conversation, rank_position: int) -> dict:
+    detail = score.breakdown(c)
+    engagement = f"{c.comments} comments"
+    if c.score:
+        engagement += f" · {c.score} reactions"
+
+    return {
+        "id": c.source_id,
+        "rank": rank_position,
+        "score": c.opportunity or 0,
+        "band": score.band(c.opportunity or 0),
+        "url": c.url,
+        "kind": c.kind,
+        "category": c.category,
+        "is_answered": c.is_answered,
+        "title": c.title or "(no title)",
+        "author": c.author or "unknown",
+        "container": c.container,
+        "created_at": c.created_at.isoformat(),
+        "engagement": engagement,
+        "problem": c.pain_point or "",
+        "evidence_quote": c.evidence_quote or "",
+        "intent": c.intent,
+        "domain": c.post_domain,
+        "asking_for_help": c.asking_for_help,
+        "product_fit": c.product_fit or 0.0,
+        "reason": c.reason or "",
+        "explain": detail.get("explain", ""),
+    }
+
+
+def _mark(run: dict, stage_id: str, state: str, detail: str | None = None) -> None:
+    for stage in run["stages"]:
+        if stage["id"] == stage_id:
+            stage["state"] = state
+            if detail:
+                stage["detail"] = detail
+    done = sum(1 for s in run["stages"] if s["state"] == "done")
+    run["percent"] = round(100 * done / len(run["stages"]))
+
+
+def _finish(run: dict) -> None:
+    for stage in run["stages"]:
+        if stage["state"] in ("waiting", "running"):
+            stage["state"] = "done"
+    run["state"] = "succeeded"
+    run["percent"] = 100

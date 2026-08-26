@@ -11,6 +11,8 @@ import HomeRoute from "@/routes/home";
 import LandingRoute from "@/routes/landing";
 import LoginRoute from "@/routes/login";
 import NewProductRoute from "@/routes/new-search";
+import OpportunitiesRoute from "@/routes/opportunities";
+import PlanRoute from "@/routes/plan";
 import ReadingWebsiteRoute from "@/routes/reading-website";
 import ResultsRoute from "@/routes/results";
 import ReviewPlanRoute from "@/routes/review-plan";
@@ -63,6 +65,8 @@ export default function App() {
               <Route path="/home" element={<HomeRoute />} />
               <Route path="/new" element={<NewProductRoute />} />
               <Route path="/products/:productId/reading" element={<ReadingWebsiteRoute />} />
+              <Route path="/products/:productId/plan" element={<PlanRoute />} />
+              <Route path="/opportunities" element={<OpportunitiesRoute />} />
               <Route path="/settings/product" element={<SettingsProductRoute />} />
 
               {/* From the previous flow. Unreachable from the new one and

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useLocation, useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
@@ -15,15 +15,10 @@ import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 
 import { ErrorBlock, Loading, PageHeader } from "@/components/StateBlocks";
 import MarkdownDialog from "@/features/product/MarkdownDialog";
-import { api } from "@/lib/client";
 import { isRunning, productApi, type Product } from "@/lib/productApi";
 import { MONO } from "@/styles/theme";
 
 const POLL_MS = 1500;
-
-interface NavState {
-  briefId?: string;
-}
 
 /**
  * Between the brief and the plan.
@@ -39,7 +34,6 @@ interface NavState {
 export default function ReadingWebsiteRoute() {
   const { productId } = useParams();
   const navigate = useNavigate();
-  const briefId = (useLocation().state as NavState | null)?.briefId;
 
   const [product, setProduct] = useState<Product | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -66,21 +60,13 @@ export default function ReadingWebsiteRoute() {
     return () => window.clearTimeout(timer.current);
   }, [poll]);
 
-  /* The brief still lives in the in-browser fake, because briefs and plans
-     have no service yet. Only the product half is real. */
-  const carryOn = async () => {
-    if (!briefId) {
-      navigate("/new");
-      return;
-    }
+  /* Straight to the marketing plan.
+     The planner has usually already written it in the background by the time
+     the crawl reports ready, so this is normally instant. When it has not,
+     the plan screen shows it being written rather than an empty page. */
+  const carryOn = () => {
     setContinuing(true);
-    try {
-      const plan = await api.compilePlan(briefId);
-      navigate(`/plans/${plan.id}`, { replace: true });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unknown error.");
-      setContinuing(false);
-    }
+    navigate(`/products/${productId}/plan`, { replace: true });
   };
 
   if (error) {
