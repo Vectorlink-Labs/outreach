@@ -52,16 +52,37 @@ export default function EditableChips({
 
   return (
     <Box>
-      <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
-        {label}
-      </Typography>
+      <Stack direction="row" alignItems="baseline" gap={1} sx={{ mb: 0.25 }}>
+        <Typography
+          variant="overline"
+          sx={{
+            fontSize: 10,
+            letterSpacing: ".1em",
+            color: "text.secondary",
+            lineHeight: 1.8,
+          }}
+        >
+          {label}
+        </Typography>
+        <Typography
+          variant="caption"
+          sx={{ fontFamily: MONO, fontSize: 11, color: "text.disabled" }}
+        >
+          {values.length}
+        </Typography>
+      </Stack>
+
       {hint && (
-        <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 0.75 }}>
+        <Typography
+          variant="caption"
+          color="text.secondary"
+          sx={{ display: "block", maxWidth: "58ch" }}
+        >
           {hint}
         </Typography>
       )}
 
-      <Stack direction="row" flexWrap="wrap" gap={0.75} sx={{ mt: 0.75, mb: 1 }}>
+      <Stack direction="row" flexWrap="wrap" gap={0.75} sx={{ mt: 1.25, mb: 1.25 }}>
         {values.map((value) => {
           const problem = warn?.(value) ?? null;
           return (
@@ -73,13 +94,18 @@ export default function EditableChips({
               color={problem ? "warning" : "default"}
               variant={problem ? "filled" : "outlined"}
               title={problem ?? undefined}
-              sx={{ fontFamily: MONO, fontSize: 11.5 }}
+              sx={{
+                fontFamily: MONO,
+                fontSize: 11.5,
+                height: 26,
+                bgcolor: problem ? undefined : "background.paper",
+              }}
             />
           );
         })}
         {values.length === 0 && (
           <Typography variant="caption" color="text.disabled">
-            none
+            none yet — add one below
           </Typography>
         )}
       </Stack>
@@ -98,7 +124,9 @@ export default function EditableChips({
         }}
         slotProps={{
           input: {
-            sx: { fontFamily: MONO, fontSize: 12.5 },
+            // Explicit, because this often sits on a tinted panel where an
+            // inherited transparent field would disappear into the backing.
+            sx: { fontFamily: MONO, fontSize: 12.5, bgcolor: "background.paper" },
             endAdornment: (
               <InputAdornment position="end">
                 <IconButton size="small" onClick={add} disabled={!typed.trim()}>

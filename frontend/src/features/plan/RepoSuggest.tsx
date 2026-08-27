@@ -71,7 +71,7 @@ export default function RepoSuggest({ topic, current, onAdd }: Props) {
           }}
           slotProps={{
             input: {
-              sx: { fontSize: 13 },
+              sx: { fontSize: 13, bgcolor: "background.paper" },
               endAdornment: (
                 <InputAdornment position="end">
                   <IconButton size="small" onClick={search} disabled={loading}>
