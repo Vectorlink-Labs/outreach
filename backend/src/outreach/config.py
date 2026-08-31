@@ -61,6 +61,33 @@ class Settings(BaseSettings):
     #: One call per product, so the cost difference is a few cents a month.
     planner_model: str = "gpt-4o"
 
+    #: How many of the best-embedding-ranked posts the triage reads.
+    #:
+    #: 0 means "all of them", which is what the triage was built for.
+    #:
+    #: ── What this number costs, measured ─────────────────────────────────
+    #:
+    #: Set to 25 by decision, to keep the token bill down. The trade is real
+    #: and worth writing down rather than rediscovering later. On a Coalent
+    #: run over 1,509 candidates, the ten results the full triage produced sat
+    #: at these embedding ranks:
+    #:
+    #:     51, 105, 182, 141, 87, 169, 80, 3, 44, 57
+    #:
+    #: Only one is inside the top 25, and it is the weakest result of the ten
+    #: (score 20). The three best - 52, 47 and 46 - sit at ranks 51, 105 and
+    #: 182 and are all cut.
+    #:
+    #: The cause is not a bad embedding model. Cosine similarity ranks by
+    #: which words appear, so a shouty title carrying the product's exact
+    #: vocabulary ranks 3rd, while somebody describing the actual problem in
+    #: their own words ranks 182nd. That gap is precisely what the triage
+    #: exists to close, and reading only the top 25 puts it back.
+    #:
+    #: Raising this is the single highest-value change available to the
+    #: quality of results. It costs about a cent a run at 1,500.
+    triage_pool: int = Field(default=25, ge=0)
+
     #: Keep only authors with no history in the repository they posted in.
     #:
     #: On, this removes roughly 80% of results - people writing tickets in

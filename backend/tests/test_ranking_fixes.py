@@ -598,3 +598,274 @@ async def test_a_single_mention_is_not_evidence():
 @pytest.mark.asyncio
 async def test_no_phrases_costs_nothing():
     assert await gh.repos_by_hits([]) == []
+
+
+# ------------------------------------------------- competitor lookup
+
+
+REPO_SEARCH = "https://api.github.com/search/repositories"
+
+
+def _repo(full_name: str, stars: int = 1000, open_issues: int = 10) -> dict:
+    return {
+        "full_name": full_name,
+        "description": "d",
+        "stargazers_count": stars,
+        "open_issues_count": open_issues,
+    }
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_a_famous_repo_that_merely_mentions_the_name_is_not_picked():
+    """
+    The bug this function exists for.
+
+    Sorting by stars answers "the most popular repository that mentions this
+    word", not "the repository called this" - which resolved `mem0` to a
+    92,000 star project called claude-mem, and `Haystack` to funNLP.
+    """
+    respx.get(REPO_SEARCH).mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "items": [
+                    _repo("thedotmack/claude-mem", stars=92_000),
+                    _repo("mem0ai/mem0", stars=30_000, open_issues=706),
+                ]
+            },
+        )
+    )
+
+    async with httpx.AsyncClient() as client:
+        found = await gh.find_repo_by_name(client, "mem0")
+
+    assert found is not None
+    assert found["full_name"] == "mem0ai/mem0"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_punctuation_does_not_prevent_a_match():
+    respx.get(REPO_SEARCH).mock(
+        return_value=httpx.Response(200, json={"items": [_repo("zilliztech/GPT-Cache")]})
+    )
+
+    async with httpx.AsyncClient() as client:
+        found = await gh.find_repo_by_name(client, "gptcache")
+
+    assert found is not None
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_no_confident_match_returns_none_rather_than_a_guess():
+    """
+    A wrong repository is not a near miss.
+
+    It is a whole sweep spent on a project unrelated to the product, which is
+    worse than the empty slot it filled.
+    """
+    respx.get(REPO_SEARCH).mock(
+        return_value=httpx.Response(
+            200, json={"items": [_repo("someone/something-else", stars=80_000)]}
+        )
+    )
+
+    async with httpx.AsyncClient() as client:
+        assert await gh.find_repo_by_name(client, "coalent") is None
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_the_busiest_project_wins_a_shared_name():
+    """Several projects share a name; only one has anybody filing issues."""
+    respx.get(REPO_SEARCH).mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "items": [
+                    _repo("abandoned/zep", stars=9_000, open_issues=0),
+                    _repo("getzep/zep", stars=3_000, open_issues=24),
+                ]
+            },
+        )
+    )
+
+    async with httpx.AsyncClient() as client:
+        found = await gh.find_repo_by_name(client, "zep")
+
+    assert found is not None
+    assert found["full_name"] == "getzep/zep"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_the_query_restricts_matching_to_the_name():
+    route = respx.get(REPO_SEARCH).mock(
+        return_value=httpx.Response(200, json={"items": []})
+    )
+
+    async with httpx.AsyncClient() as client:
+        await gh.find_repo_by_name(client, "mem0")
+
+    assert "in:name" in route.calls[0].request.url.params["q"]
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_a_failed_lookup_is_not_an_exception():
+    respx.get(REPO_SEARCH).mock(return_value=httpx.Response(503))
+
+    async with httpx.AsyncClient() as client:
+        assert await gh.find_repo_by_name(client, "mem0") is None
+
+
+@pytest.mark.asyncio
+async def test_an_unmakeable_comparison_is_not_reported_as_a_perfect_one():
+    """
+    The bug that switched the whole relevance filter off without saying so.
+
+    `_by_relevance` answered 1.0 - a perfect match - when it could not
+    compare, and every caller read that as "checked, and ideal". One
+    transient embedding error therefore let every candidate through, which
+    is how a repository scoring 0.27 against the gate ended up in a plan.
+    """
+    from outreach import planner
+
+    scored = await planner._by_relevance(
+        [{"full_name": "wmww/Pinecone", "description": "x", "open_issues": 1}],
+        "",  # nothing to compare against
+    )
+
+    assert scored[0][1] == planner.UNCHECKED
+    assert scored[0][1] != 1.0
+
+
+def test_unscored_survives_but_badly_scored_does_not():
+    """
+    Opposite treatment on purpose.
+
+    "Scored badly" is a reason to drop a repository. "Could not be scored" is
+    not - a network blip should not empty the plan - so those are kept and
+    the run says so instead of passing them off as verified.
+    """
+    from outreach import planner
+
+    assert planner._passes(planner.UNCHECKED)
+    assert planner._passes(0.55)
+    assert not planner._passes(0.27)
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_rescuing_a_wrong_owner_uses_the_same_rules_as_a_lookup():
+    """
+    Two functions answered one question, and the fix landed in one of them.
+
+    `resolve_repo` kept its own most-starred-exact-name rule, so asked to
+    rescue `pinecone/pinecone` it returned `wmww/Pinecone` long after the
+    other path had stopped doing that.
+    """
+    respx.get(REPO_SEARCH).mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "items": [
+                    _repo("wmww/Pinecone", stars=896, open_issues=40),
+                    _repo("pinecone-io/canopy", stars=1_031, open_issues=12),
+                ]
+            },
+        )
+    )
+
+    async with httpx.AsyncClient() as client:
+        assert await gh.resolve_repo(client, "pinecone/pinecone") == "pinecone-io/canopy"
+
+
+@pytest.mark.parametrize(
+    ("owner", "product"),
+    [
+        ("pinecone-io", "pinecone"),   # suffix: io
+        ("mem0ai", "mem0"),            # suffix: ai
+        ("langchain-ai", "langchain"),
+        ("getzep", "zep"),             # prefix: the plain name was taken
+        ("weaviate", "weaviate"),      # exact
+    ],
+)
+def test_an_organisation_named_after_the_product_is_recognised(owner, product):
+    assert gh._is_owner_for(owner, product)
+
+
+@pytest.mark.parametrize(
+    ("owner", "product"),
+    [
+        # Each of these actually took the real product's slot in a run.
+        ("zephyrproject-rtos", "zep"),   # an RTOS
+        ("haystackeditor", "haystack"),  # a code editor
+        ("langchain4j", "langchain"),    # the Java port, not the project
+        ("matrix-org", "pinecone"),      # a p2p network router
+        ("wmww", "pinecone"),            # "an unmaintained programming language"
+    ],
+)
+def test_a_coincidental_prefix_is_not_an_organisation_match(owner, product):
+    """
+    `startswith` alone is far too loose, and every one of these proves it.
+
+    The remainder has to look like something a company appends to its own
+    name, not merely be any string at all.
+    """
+    assert not gh._is_owner_for(owner, product)
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_the_right_organisation_beats_a_more_popular_name_match():
+    """
+    Pinecone owns no repository called `pinecone`, so an exact-name rule
+    rejected every correct answer and took two impostors instead.
+    """
+    respx.get(REPO_SEARCH).mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "items": [
+                    _repo("wmww/Pinecone", stars=896, open_issues=40),
+                    _repo("matrix-org/pinecone", stars=488, open_issues=30),
+                    _repo("pinecone-io/canopy", stars=1_031, open_issues=12),
+                ]
+            },
+        )
+    )
+
+    async with httpx.AsyncClient() as client:
+        found = await gh.find_repo_candidates(client, "Pinecone")
+
+    assert [f["full_name"] for f in found] == ["pinecone-io/canopy"]
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_several_candidates_come_back_for_the_caller_to_judge():
+    """
+    The right organisation still has the wrong repository in it: Pinecone's
+    busiest is a folder of notebooks. Only a description can separate those,
+    so the choice belongs to the caller.
+    """
+    respx.get(REPO_SEARCH).mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "items": [
+                    _repo("pinecone-io/examples", open_issues=90),
+                    _repo("pinecone-io/canopy", open_issues=12),
+                ]
+            },
+        )
+    )
+
+    async with httpx.AsyncClient() as client:
+        found = await gh.find_repo_candidates(client, "Pinecone")
+
+    assert len(found) == 2
+    assert found[0]["full_name"] == "pinecone-io/examples"  # busiest first

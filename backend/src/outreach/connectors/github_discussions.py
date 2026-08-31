@@ -349,7 +349,7 @@ async def search(
 
                 try:
                     added, cursor = await _fetch_page(
-                        client, query, cursors[label], result, seen, repo_facts
+                        client, query, cursors[label], result, seen, repo_facts, label
                     )
                 except DiscussionsUnavailable:
                     # Fatal for the whole search rather than for this query.
@@ -408,6 +408,7 @@ async def _fetch_page(
     result: SearchResult,
     seen: set[str],
     repo_facts: dict[str, tuple[int | None, bool]],
+    label: str = "",
 ) -> tuple[int, str | None]:
     """
     One page of one query. Returns (new conversations, cursor for the next).
@@ -455,6 +456,7 @@ async def _fetch_page(
             repository.get("stargazerCount"),
             bool(repository.get("isArchived")),
         )
+        conversation.found_by = label
         result.conversations.append(conversation)
         added += 1
 

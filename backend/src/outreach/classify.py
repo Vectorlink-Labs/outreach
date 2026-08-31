@@ -23,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import re
 from pathlib import Path
 
 import httpx
@@ -124,6 +125,271 @@ class Analysis(BaseModel):
 
 class ClassifyError(Exception):
     """Something the user needs to know about, phrased for a person."""
+
+
+# ------------------------------------------------------- stage 4a: the gate
+
+
+#: The vocabulary of the world this product lives in.
+#:
+#: Deliberately broad and deliberately not product-specific. This gate is not
+#: trying to decide whether a post is a lead - that is two stages away and
+#: costs money. It is throwing out the "bump eslint to 9.2" and "fix typo in
+#: README" that a repository sweep returns by the hundred, because a sweep
+#: takes *every* recent issue in a repository and most of what any repository
+#: does is not about us.
+#:
+#: A narrow gate here would be the most expensive mistake available: it runs
+#: before anything has been read, so whatever it drops is gone silently and
+#: without appeal. Hence one shared word is enough.
+DOMAIN_WORDS = frozenset(
+    {
+        "llm", "llms", "gpt", "claude", "openai", "anthropic", "gemini",
+        "rag", "agent", "agents", "agentic", "prompt", "prompts",
+        "embedding", "embeddings", "embed", "vector", "vectors",
+        "retrieval", "retrieve", "index", "indexing", "reindex",
+        "cache", "cached", "caching", "context", "token", "tokens",
+        "chunk", "chunks", "chunking", "inference", "completion",
+        "memory", "semantic", "corpus", "knowledge", "langchain",
+        "llamaindex", "ollama", "vllm", "transformer", "transformers",
+    }
+)
+
+_WORD = re.compile(r"[a-z0-9_]+")
+
+
+def gate(
+    conversations: list[Conversation], terms: list[str] | None = None
+) -> tuple[list[Conversation], str]:
+    """
+    Drop posts with no vocabulary in common with us. Free, no API call.
+
+    Returns what survived and a note describing what went.
+
+    The plan's own search terms are folded in, so a product whose words are
+    not in `DOMAIN_WORDS` still passes its own results through. A post fetched
+    *by* a phrase always contains that phrase, so phrase results are never at
+    risk here - this only ever bites repository sweeps, which is exactly where
+    the junk is.
+    """
+    vocabulary = set(DOMAIN_WORDS)
+    for term in terms or []:
+        vocabulary.update(w for w in _WORD.findall(term.lower()) if len(w) >= 3)
+
+    kept: list[Conversation] = []
+    for conversation in conversations:
+        words = set(_WORD.findall(conversation.text[:MAX_BODY_CHARS].lower()))
+        if words & vocabulary:
+            kept.append(conversation)
+
+    dropped = len(conversations) - len(kept)
+    note = (
+        f"gate: dropped {dropped} with nothing in common with this product"
+        if dropped
+        else "gate: everything shared vocabulary with this product"
+    )
+    return kept, note
+
+
+# ----------------------------------------------------- stage 4b: the triage
+
+
+TRIAGE_PROMPT_PATH = Path(__file__).parent / "llm" / "prompts" / "triage.v1.md"
+TRIAGE_VERSION = "triage.v2"
+TRIAGE_CACHE_PATH = CACHE_PATH.parent / "triage.json"
+
+#: Titles per request. Big enough that the rubric is amortised over many
+#: titles, small enough that one malformed reply loses forty judgements
+#: rather than four hundred.
+TRIAGE_BATCH = 40
+
+#: Below this a title is not worth the full judge. 2 is "plausibly this
+#: problem", and the whole design of the rubric is that an unsure title lands
+#: there rather than at 1.
+TRIAGE_KEEP_FROM = 2
+
+
+async def triage(
+    product: str,
+    conversations: list[Conversation],
+    keep: int,
+) -> tuple[list[Conversation], list[str]]:
+    """
+    Read the titles cheaply, and return the `keep` best for the real judge.
+
+    ── Why this exists ──────────────────────────────────────────────────────
+
+    The stage it replaces sorted by embedding similarity and took the top N.
+    Measured against six leads found by hand, that signal was flat: 0.287 to
+    0.363 raw cosine across the best and worst of them, inside a band where
+    several hundred generic posts also sit. Sorting by it and cutting at ten
+    is close to sampling at random from the top of the topic.
+
+    A model reading the title is not flat. It costs about a fifth of a cent
+    for a thousand titles - roughly a twentieth of what judging a hundred
+    posts costs - and it answers the question the embedding cannot: is
+    something *happening* here, or does this merely share our words.
+
+    Falls back to the incoming order on any failure. A worse ordering is
+    survivable; refusing to return anything is not.
+    """
+    if not conversations:
+        return [], []
+    if not settings.openai_api_key:
+        raise ClassifyError("No OPENAI_API_KEY set in backend/.env.")
+
+    cache = _load_json(TRIAGE_CACHE_PATH)
+    scores: dict[int, int] = {}
+    pending: list[int] = []
+
+    for position, conversation in enumerate(conversations):
+        key = _triage_key(conversation, product)
+        if key in cache:
+            scores[position] = int(cache[key])
+        else:
+            pending.append(position)
+
+    hits = len(scores)
+    failures = 0
+
+    if pending:
+        template = TRIAGE_PROMPT_PATH.read_text(encoding="utf-8")
+        batches = [
+            pending[i : i + TRIAGE_BATCH]
+            for i in range(0, len(pending), TRIAGE_BATCH)
+        ]
+        semaphore = asyncio.Semaphore(CONCURRENCY)
+
+        async with httpx.AsyncClient(timeout=60.0) as client:
+
+            async def one(batch: list[int]) -> None:
+                nonlocal failures
+                async with semaphore:
+                    try:
+                        got = await _ask_triage(
+                            client, template, product,
+                            [conversations[p] for p in batch],
+                        )
+                    except Exception as exc:
+                        failures += len(batch)
+                        log.warning("triage.failed", error=str(exc))
+                        # Unscored, not zero. A batch that failed says
+                        # nothing about its titles, and scoring them 0 would
+                        # silently delete forty posts on one bad response.
+                        for position in batch:
+                            scores[position] = TRIAGE_KEEP_FROM
+                        return
+
+                for offset, position in enumerate(batch):
+                    score = got.get(offset, TRIAGE_KEEP_FROM)
+                    scores[position] = score
+                    cache[_triage_key(conversations[position], product)] = score
+
+            await asyncio.gather(*(one(b) for b in batches))
+
+        _save_json(TRIAGE_CACHE_PATH, cache)
+
+    # Stable within a score: the incoming order is embedding rank, which is a
+    # weak signal but not a worthless one, so it breaks ties.
+    ordered = sorted(
+        range(len(conversations)),
+        key=lambda p: (-scores.get(p, TRIAGE_KEEP_FROM), p),
+    )
+    worth_reading = [p for p in ordered if scores.get(p, 0) >= TRIAGE_KEEP_FROM]
+
+    chosen = worth_reading[:keep]
+
+    # The distribution, not just the total. "1458 worth a closer look" out of
+    # 1511 says the triage passed everything and the ordering did the work,
+    # which is a different system from the one intended - and indistinguishable
+    # from a healthy run if only the total is reported.
+    spread = {s: 0 for s in (3, 2, 1, 0)}
+    for position in range(len(conversations)):
+        spread[scores.get(position, TRIAGE_KEEP_FROM)] += 1
+
+    notes = [
+        f"triage: read {len(conversations)} titles ({hits} from cache) - "
+        f"{spread[3]} clear, {spread[2]} maybe, {spread[1]} adjacent, "
+        f"{spread[0]} unrelated; judging the best {len(chosen)}"
+    ]
+    if failures:
+        notes.append(f"triage: {failures} titles could not be scored and were kept")
+    if spread[3] > keep:
+        notes.append(
+            f"triage: {spread[3] - keep} more scored a clear match but were cut "
+            f"by the {keep} judge limit - raise CLASSIFY_TOP to read them"
+        )
+
+    return [conversations[p] for p in chosen], notes
+
+
+def _triage_key(conversation: Conversation, product: str) -> str:
+    material = "\x00".join(
+        [
+            conversation.title or "",
+            conversation.container or "",
+            product,
+            TRIAGE_VERSION,
+            settings.llm_model,
+        ]
+    )
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()[:32]
+
+
+async def _ask_triage(
+    client: httpx.AsyncClient,
+    template: str,
+    product: str,
+    batch: list[Conversation],
+) -> dict[int, int]:
+    """One batch of titles to {offset: score}."""
+    titles = "\n".join(
+        f"{i}. [{c.container or '?'}] {(c.title or '(no title)')[:160]}"
+        for i, c in enumerate(batch)
+    )
+    prompt = template.format(product=product.strip(), titles=titles)
+
+    response = await client.post(
+        CHAT_URL,
+        headers={"Authorization": f"Bearer {settings.openai_api_key}"},
+        json={
+            "model": settings.llm_model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0,
+            "response_format": {"type": "json_object"},
+        },
+    )
+    if response.status_code != 200:
+        raise ClassifyError(
+            f"OpenAI returned {response.status_code}: {response.text[:200]}"
+        )
+
+    payload = json.loads(response.json()["choices"][0]["message"]["content"])
+    out: dict[int, int] = {}
+    for entry in payload.get("scores") or []:
+        try:
+            index = int(entry["i"])
+            score = int(entry["s"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if 0 <= index < len(batch):
+            out[index] = max(0, min(3, score))
+    return out
+
+
+def _load_json(path: Path) -> dict:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_json(path: Path, data: dict) -> None:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data), encoding="utf-8")
+    except OSError as exc:
+        log.warning("cache.write_failed", path=str(path), error=str(exc))
 
 
 # ---------------------------------------------------------------- the cache

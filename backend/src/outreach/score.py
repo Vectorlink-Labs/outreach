@@ -73,6 +73,27 @@ FRESHNESS_HALF_LIFE = 30.0
 #: Engagement above this adds nothing more.
 ENGAGEMENT_SATURATION = 50.0
 
+#: Star counts mapped onto 0-1, in log space, between these two points.
+#:
+#: ── Why reach is scored at all ───────────────────────────────────────────
+#:
+#: Because the product is outreach, not lead capture. The same comment under
+#: the same issue is read by a different number of people depending on whose
+#: repository it is in, and that difference is the entire reason for
+#: commenting rather than emailing.
+#:
+#: Nothing used to know this. A real run put a post in a 1,655 star project
+#: at the top of the page, above one in a 63,977 star project and another in
+#: an 86,089 star project. All three were good posts; only one of them was
+#: worth the half hour it takes to write a careful public reply.
+#:
+#: Log scale, because the difference between 500 stars and 5,000 is enormous
+#: and the difference between 80,000 and 140,000 is not. The floor matches
+#: `min_repo_stars`, since anything below it was dropped before scoring, and
+#: the ceiling is set where a project is unambiguously well known.
+REACH_FLOOR_STARS = 500
+REACH_SATURATION_STARS = 50_000
+
 
 def opportunity_score(conversation: Conversation, now: datetime | None = None) -> int:
     """0-100. Multiplicative, so a failed gate cannot be bought back."""
@@ -81,11 +102,15 @@ def opportunity_score(conversation: Conversation, now: datetime | None = None) -
     match = _match(conversation)
     intent = INTENT_WEIGHT.get(conversation.intent or "IRRELEVANT", 0.0)
 
-    # 0.70 to 1.00. Deliberately narrow: recency and popularity break ties,
-    # they do not make an irrelevant post into a lead.
+    # 0.60 to 1.00. Still deliberately narrow: reach, recency and popularity
+    # reorder posts that already passed both gates, and none of them can make
+    # an irrelevant post into a lead. Reach carries the largest share of the
+    # three because it is the only one that changes how many people read the
+    # reply, rather than how likely the thread is to still be live.
     modifier = (
-        0.70
-        + 0.20 * _freshness(conversation, now)
+        0.60
+        + 0.15 * _reach(conversation)
+        + 0.15 * _freshness(conversation, now)
         + 0.10 * _engagement(conversation)
     )
 
@@ -135,12 +160,20 @@ def breakdown(conversation: Conversation, now: datetime | None = None) -> dict:
     intent = INTENT_WEIGHT.get(conversation.intent or "IRRELEVANT", 0.0)
     freshness = _freshness(conversation, now)
     engagement = _engagement(conversation)
+    reach = _reach(conversation)
     match = _match(conversation)
 
     # The gate is match x intent. Everything else only modulates it, which is
     # why they are shown as a separate band rather than as equal components.
     gate = match * intent
-    modifier = 0.70 + 0.20 * freshness + 0.10 * engagement
+    modifier = 0.60 + 0.15 * reach + 0.15 * freshness + 0.10 * engagement
+
+    stars = conversation.repo_stars
+    reach_note = (
+        f"{stars:,} stars in {conversation.container}"
+        if stars is not None and stars >= 0
+        else "star count unknown, scored as average"
+    )
 
     return {
         "components": [
@@ -152,10 +185,17 @@ def breakdown(conversation: Conversation, now: datetime | None = None) -> dict:
                 "note": conversation.intent or "unknown",
             },
             {
+                "name": "Reach",
+                "raw": round(reach, 3),
+                "weight": 0.15,
+                "points": round(100 * gate * 0.15 * reach),
+                "note": reach_note,
+            },
+            {
                 "name": "Freshness",
                 "raw": round(freshness, 3),
-                "weight": 0.20,
-                "points": round(100 * gate * 0.20 * freshness),
+                "weight": 0.15,
+                "points": round(100 * gate * 0.15 * freshness),
                 "note": f"{(now - conversation.created_at).days} days old",
             },
             {
@@ -171,7 +211,7 @@ def breakdown(conversation: Conversation, now: datetime | None = None) -> dict:
         "final": conversation.opportunity or 0,
         "explain": (
             f"Product fit {match:.0%} multiplied by intent {intent:.0%}. "
-            f"Recency and engagement adjust the result by {modifier:.0%}."
+            f"Reach, recency and engagement adjust the result by {modifier:.0%}."
         ),
     }
 
@@ -223,6 +263,24 @@ def _freshness(conversation: Conversation, now: datetime) -> float:
     """
     age_days = max((now - conversation.created_at).total_seconds() / 86400.0, 0.0)
     return 0.5 ** (age_days / FRESHNESS_HALF_LIFE)
+
+
+def _reach(conversation: Conversation) -> float:
+    """
+    How many people a reply here would reach, 0-1.
+
+    Unknown returns the midpoint rather than zero. A star count that was
+    never looked up - a source with no equivalent, a failed request - is not
+    evidence of an obscure project, and scoring it as one would quietly bury
+    every result from any source that does not report stars.
+    """
+    stars = conversation.repo_stars
+    if stars is None or stars < 0:
+        return 0.5
+
+    low = math.log1p(REACH_FLOOR_STARS)
+    high = math.log1p(REACH_SATURATION_STARS)
+    return _clamp((math.log1p(stars) - low) / (high - low))
 
 
 def _engagement(conversation: Conversation) -> float:

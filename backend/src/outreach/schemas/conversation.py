@@ -63,6 +63,30 @@ class Conversation(BaseModel):
 
     labels: list[str] = []
 
+    repo_stars: int | None = None
+    """
+    Stars on the repository this lives in. None when it was never looked up.
+
+    Not a quality signal about the post - it is a reach signal about the room.
+    The same comment under the same issue is read by a different number of
+    people in a 1,600 star project and a 90,000 star one, and outreach is the
+    one use of this data where that difference is the point.
+    """
+
+    found_by: str = ""
+    """
+    Which query first produced this: "phrase: re-embed + cost", "repo: owner/x".
+
+    Recorded at fetch time because it cannot be recovered afterwards. A post
+    matches whichever queries it matches, and the same post arrives from
+    several - so asking later "which problem was this found under?" has no
+    answer, while the query that actually returned it does.
+
+    This is what the coverage report counts. Without it a run can search five
+    problems, return results for one, and look identical to a run where the
+    market only cared about one.
+    """
+
     category: str | None = None
     """
     A GitHub Discussion's category: "Q&A", "Ideas", "Show and tell", ...

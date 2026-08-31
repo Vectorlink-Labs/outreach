@@ -24,14 +24,19 @@ advice is free, generic, and worth nothing.
 different product?** If yes, delete it and write something only true of this
 one.
 
-Concrete means naming things:
+Concrete means naming things. This example is **a tool that finds flaky tests
+in CI** — a different product from the one you are planning for, so that you
+copy the level of detail and never the names:
 
 | vague | concrete |
 |---|---|
-| post on GitHub | answer issues in `run-llama/llama_index` and `chroma-core/chroma` |
-| engage on Reddit | r/LocalLLaMA and r/vectordatabase, where index staleness comes up weekly |
-| write content | a teardown of why re-embedding on every change costs 40x more than it should |
-| target developers | backend engineers running RAG in production at 10–200 person companies |
+| post on GitHub | answer issues in `nedbat/coveragepy` and `pytest-dev/pytest` |
+| engage on Reddit | r/devops and r/ExperiencedDevs, where CI flakiness comes up weekly |
+| write content | a teardown of why retrying a flaky test hides the race instead of fixing it |
+| target developers | platform engineers running CI at 10–200 person companies |
+
+Every name in your plan must come from **this** product's world, not from that
+table.
 
 ## Platforms
 
@@ -45,21 +50,54 @@ plan, and a plan with only search results in it is not a marketing plan.
 Name real places. `r/LocalLLaMA`, not "relevant subreddits". A named Discord
 or Slack community, not "developer communities".
 
-Two of them we can search automatically, so their `search_terms` get used
+Two of them we can search automatically, so their `term_groups` get used
 directly by our crawler:
 
 - `github` — issues and discussions in public repositories
 - `hackernews` — posts and comments
 
-**`target_places` matters more than `search_terms`.** For GitHub, name **8 to
-12 real repositories** where this product's users already file issues — the
-popular libraries and tools they build with. Every recent issue in such a
-repository is a candidate without needing a keyword at all, which is how we
-find someone who described the problem in words nobody thought to search for.
-Two repositories is not enough. Guess generously; a wrong repository the user
-deletes costs nothing, a missing one costs a whole source of leads.
+**`target_places` matters more than the terms, and it is not close.** Measured
+on a real run: repository sweeps produced 845 of 1,509 candidates while every
+search term put together produced about 660. Every recent issue in a named
+repository becomes a candidate with no keyword at all, which is how we find
+someone who described the problem in words nobody thought to search for.
 
-`search_terms` come in two shapes, and **most of yours should be the second**:
+Name **15 to 20 real repositories**, drawn from *both* of these:
+
+**1. Competitors and neighbours — name these first.** Projects that solve this
+same problem, or the next problem along. Their issue trackers are full of people
+who already know they have this problem and are hitting the limits of another
+tool. This is the highest-value list in the whole plan and the one a model
+usually forgets, because it feels strange to point at a rival. Do it anyway: an
+open bug in a competitor's tracker is read by exactly the people evaluating
+tools in this space.
+
+**2. The big frameworks their users build with.** The libraries this product
+plugs into. Broader and noisier, but large and active.
+
+**Prefer large, well-known projects — but only ones that are alive today.** A
+comment in a 90,000 star repository is read by a different order of magnitude
+of people than the same comment in a 1,600 star one, and the whole point of
+answering in public is who else is reading.
+
+That argument fails completely the moment a project goes quiet, and quiet
+famous projects are exactly what comes to mind first. A real plan came back
+with `google-research/bert`, `allenai/allennlp`, `facebookresearch/ParlAI` and
+`openai/gpt-3` — four genuinely famous names, one of them an archived paper
+with no issue tracker at all, none of them carrying a live conversation about
+anything. Every slot they took was a slot that found nobody.
+
+The search reads issues from the last few months, so **fame from 2019 is worth
+nothing here.** Before naming a project, ask whether people are arguing in its
+tracker *this month*. A smaller project with a live argument beats a monument
+every time. If you are unsure whether a famous name is still active, leave it
+out — something else will fill the slot.
+
+Guess generously — every name is checked against GitHub before it runs, renames
+are followed and dead ones dropped, so a wrong guess costs nothing while a
+missing one costs a whole source of leads.
+
+Individual terms come in two shapes, and **most of yours should be the second**:
 
 | shape | example | how it matches |
 |---|---|---|
@@ -83,38 +121,57 @@ appear, where `cache` alone is a lottery.
 Give **at least half** your terms as intersections. Pair the product's own
 concept with the context it breaks in.
 
-### Give every problem a term, then go deep on each
+### Group your terms by the problem they look for
 
-Look at the list of problems in the profile above. **Each one gets at least one
-term of its own** — a problem with no term is a problem this search will never
-find anybody having.
+Do not return one flat list. Return `term_groups`: **4 to 6 named problems**,
+each with **2 to 4 terms of its own**. The name is yours to choose — it should
+name a problem this product solves, in the words the product's own users would
+recognise.
 
-After that, **spend the remaining slots going deeper, not wider.** Write several
-angles on the same problem where the product is strongest. Terms that cluster on
-one concept are fine and often correct: if that is what the product is about,
-every one of them earns its place, and a search aimed squarely at a real market
-beats one spread thinly across imagined ones.
+**Why this matters more than anything else on this page.** A flat list is always
+written the same way: the problem with the catchiest phrase takes every slot, and
+the rest of the product goes unsearched. Not because the model was careless —
+because one phrase genuinely is the easiest to write ten variations of. The run
+then comes back full of people with that one problem and *nothing at all* about
+the others, and it looks like the market only cares about one thing when really
+only one thing was searched for.
 
-What is *not* fine is a term for a problem this product does not solve, added
-only to look broad. Those match, waste the budget, and return people who will
-never buy.
+A real run did exactly this. The product covered both context reuse and
+retrieval. Every result came back about prompt-cache hit rates; not one was about
+re-processing documents. Both halves were in the product. Only one was in the
+terms.
 
-So: cover each problem, then go deep on the ones that matter.
+Naming the problems first makes that visible and prevents it. Each branch gets
+its own share of the search budget, so a branch you write is a branch that
+actually runs.
 
+Here is the shape, for **a completely unrelated product** — a tool that finds
+and fixes flaky tests in CI. Copy the *structure*, never the content: your
+branches must come from the product described at the top of this page.
+
+```json
+{{
+  "Flaky tests":     ["flaky test + retry", "intermittent failure + CI"],
+  "CI spend":        ["CI minutes + cost", "pipeline + slow"],
+  "Test isolation":  ["test pollution", "shared state + tests"],
+  "Reproducing":     ["cannot reproduce + locally", "passes locally + fails CI"]
+}}
 ```
-"prompt caching + RAG"
-"cached prefix + invalidated"
-"prompt cache + miss"
-"system prompt + mutation"
-"context reuse"
-"re-embed + cost"
-```
+
+Two rules for the branches:
+
+- **A branch must be a problem this product actually solves.** A branch invented
+  to look broad matches real posts written by people who will never buy, and it
+  spends budget that a real branch needed.
+- **Within a branch, go deep.** Several angles on the same problem is exactly
+  right — that is what a branch is for. Clustering is only a failure when it
+  happens *across* the whole plan.
 
 Prefer the words somebody with the problem types over the words the industry
 uses: someone who says "cache invalidation" usually knows the answer already,
 someone who says "index is stale" does not.
 
-For every other platform, `search_terms` and `target_places` stay empty. Those
+For every other platform, `term_groups` and `target_places` stay empty. Those
 get shown as advice only, and it is better to say so than to pretend.
 
 ## Honesty
@@ -129,11 +186,20 @@ inventing detail. Somebody is going to act on this.
 
 Return only JSON:
 
+`competitors` is names only — the products somebody would genuinely use
+*instead* of this one. Name **4 to 8**, and include the ones the website never
+mentions: a product's own pages list the rivals it wants to be compared with,
+which is rarely the full field. We look each name up on GitHub ourselves, so a
+plain product name is all that is needed and a guessed `owner/repo` is worse
+than useless. Leave it empty only if this product genuinely has no comparable
+alternatives.
+
 ```json
 {{
   "strategy": "2-3 sentences: the approach, specific to this product",
   "audience": "who to reach, concretely — role, company size, what they run",
   "positioning": "one sentence: how to describe the product to that audience",
+  "competitors": ["<product name>", "<product name>", "..."],
   "platforms": [
     {{
       "key": "github",
@@ -141,8 +207,13 @@ Return only JSON:
       "why": "why this platform suits THIS product",
       "what_to_do": "the actual activity, in one or two sentences",
       "tone": "how to write there",
-      "search_terms": ["prompt caching + RAG", "stale index", "re-embed + cost"],
-      "target_places": ["run-llama/llama_index", "chroma-core/chroma"]
+      "term_groups": {{
+        "<problem 1 in your own words>": ["<term>", "<term>", "<term>"],
+        "<problem 2 in your own words>": ["<term>", "<term>"],
+        "<problem 3 in your own words>": ["<term>", "<term>"],
+        "<problem 4 in your own words>": ["<term>", "<term>"]
+      }},
+      "target_places": ["<owner/name>", "<owner/name>", "..."]
     }}
   ],
   "content_ideas": ["3 to 5 specific things to write, each a real title"],

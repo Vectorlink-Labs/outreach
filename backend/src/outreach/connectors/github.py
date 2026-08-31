@@ -350,6 +350,102 @@ async def repo_stars(
     return {n: known.get(n, -1) for n in names if n}
 
 
+async def repo_descriptions(
+    client: httpx.AsyncClient, names: list[str]
+) -> dict[str, str]:
+    """
+    What each repository says it is. Missing or unreachable ones come back "".
+
+    Needed because a repository found by counting search hits arrives as a
+    name and nothing else, and a name is far too little to judge relevance
+    from - "Grace" and "jaeger" say nothing about what they are. The
+    description is the one sentence the owner wrote to answer exactly that.
+
+    On the plain repository endpoint, so this spends from the 5,000-an-hour
+    core limit rather than the 30-a-minute search limit, and never competes
+    with the search itself.
+    """
+    headers = {"Accept": "application/vnd.github+json"}
+    if settings.github_token:
+        headers["Authorization"] = f"Bearer {settings.github_token}"
+
+    out: dict[str, str] = {}
+    semaphore = asyncio.Semaphore(12)
+
+    async def one(name: str) -> None:
+        async with semaphore:
+            try:
+                response = await client.get(
+                    f"{REPO_URL}/{name}", headers=headers, follow_redirects=True
+                )
+                if response.status_code == 200:
+                    payload = response.json()
+                    out[name] = " ".join(
+                        filter(None, [
+                            (payload.get("description") or "")[:200],
+                            " ".join(payload.get("topics") or [])[:100],
+                        ])
+                    )
+                else:
+                    out[name] = ""
+            except Exception:
+                out[name] = ""
+
+    await asyncio.gather(*(one(n) for n in names if n))
+    return out
+
+
+#: Dead names we will spend a search request each trying to rescue.
+#:
+#: On the 30-a-minute search limit, unlike the rest of this checking, so it is
+#: bounded rather than run over everything.
+MAX_RESOLVE = 8
+
+
+async def resolve_repo(client: httpx.AsyncClient, name: str) -> str | None:
+    """
+    Find the real repository behind a name whose owner is wrong.
+
+    ── Why this is worth a search request ───────────────────────────────────
+
+    A model asked to name competitors gets the *project* right and the owner
+    wrong, almost every time: `cognee/cognee`, `mem0/mem0`, `GPTCache/GPTCache`
+    and `Letta/Letta` are all real projects under an org nobody would guess -
+    `topoteretes`, `mem0ai`, `zilliztech`, `letta-ai`.
+
+    Checking those names 404s and, before this existed, dropped them. Which
+    meant the plan asked for competitors, the model answered correctly, and
+    every single answer was discarded on the prefix - leaving the slots to be
+    filled by whatever a keyword search happened to turn up.
+
+    The project half of the name is the half worth trusting, so that is what
+    gets looked up.
+
+    ── One lookup, not two ──────────────────────────────────────────────────
+
+    This used to have its own implementation - most-starred repository whose
+    name matches exactly - which is the same rule `find_repo_candidates` was
+    written to replace, and it failed the same way. Asked to rescue
+    `pinecone/pinecone` it answered `wmww/Pinecone`, "an unmaintained
+    programming language", because that project really is called Pinecone and
+    Pinecone's own repositories are not.
+
+    Two functions answering one question is how a fix lands in one of them.
+    """
+    project = name.split("/")[-1].strip()
+    if not project:
+        return None
+
+    try:
+        # No star floor: this is rescuing a name somebody meant, and small
+        # projects get their owner guessed wrong too.
+        found = await find_repo_candidates(client, project, min_stars=0, limit=1)
+    except Exception:
+        return None
+
+    return found[0]["full_name"] if found else None
+
+
 async def check_repos(
     client: httpx.AsyncClient, repos: list[str]
 ) -> tuple[list[str], list[str]]:
@@ -367,6 +463,7 @@ async def check_repos(
     """
     good: list[str] = []
     bad: list[str] = []
+    resolved_count = 0
 
     headers = {"Accept": "application/vnd.github+json"}
     if settings.github_token:
@@ -389,14 +486,35 @@ async def check_repos(
             continue
 
         if response.status_code == 200:
+            payload = response.json()
             # Use the name GitHub gives back, which is the current one after
             # any rename. Searching the old name returns nothing at all.
-            actual = response.json().get("full_name") or name
+            actual = payload.get("full_name") or name
+
+            dead = _why_unusable(payload)
+            if dead:
+                # No "skipped" here: the caller prefixes it, and saying it
+                # twice is how a note reads "skipped X skipped - ...".
+                bad.append(f"{actual} - {dead}")
+                continue
+
             good.append(actual)
             if actual.lower() != name.lower():
                 bad.append(f"{name} was renamed to {actual}")
         elif response.status_code == 404:
-            bad.append(f"{name} does not exist")
+            # The project is usually real and the owner usually guessed. Try
+            # to find it before throwing the name away, but only for the
+            # first few - this costs a search request each.
+            resolved = None
+            if resolved_count < MAX_RESOLVE:
+                resolved_count += 1
+                resolved = await resolve_repo(client, name)
+
+            if resolved and resolved.lower() not in {g.lower() for g in good}:
+                good.append(resolved)
+                bad.append(f"{name} does not exist - used {resolved} instead")
+            else:
+                bad.append(f"{name} does not exist")
         else:
             good.append(name)
 
@@ -443,6 +561,246 @@ async def find_repos(
         }
         for item in response.json().get("items", [])
     ]
+
+
+#: How long since the last commit before a project counts as dormant.
+#:
+#: Generous on purpose, and it is a different question from "is this project
+#: healthy". A competitor whose product has stalled is a *good* place to be -
+#: its tracker fills up with people who cannot get what they need any more.
+#: What is worthless is a repository nobody has touched in years, where the
+#: last few issues predate the problem we are searching for.
+#:
+#: Eighteen months keeps the stalled-but-alive and drops the museum pieces.
+DORMANT_AFTER_DAYS = 548
+
+
+def _why_unusable(payload: dict) -> str | None:
+    """
+    Why this repository cannot be swept, or None if it can be.
+
+    Every fact here arrives in a response we were already making and used to
+    throw away, which is what let a real plan spend slots on
+    `allenai/allennlp` (archived, last touched November 2022) and
+    `facebookresearch/DPR` (archived, April 2023).
+
+    Archiving is the one that matters most and is completely unambiguous: an
+    archived repository is read-only, so there is no reply box. It is not a
+    weak lead, it is an impossible one - and no amount of prompting stops a
+    model recalling famous names, because they are famous precisely for
+    having mattered a long time ago.
+    """
+    if payload.get("archived"):
+        return "the repository is archived, so nobody can reply there"
+    if payload.get("disabled"):
+        return "the repository is disabled"
+    if not payload.get("has_issues", True):
+        return "issues are turned off"
+
+    pushed = payload.get("pushed_at")
+    if pushed:
+        try:
+            last = datetime.fromisoformat(str(pushed).replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        age = (datetime.now(UTC) - last).days
+        if age > DORMANT_AFTER_DAYS:
+            return f"nothing has been pushed there in {age // 30} months"
+
+    return None
+
+
+def _slug(text: str) -> str:
+    """A name reduced to comparable letters: "GPT-Cache" and "gptcache" match."""
+    return "".join(c for c in text.lower() if c.isalnum())
+
+
+async def repos_with_discussions(
+    client: httpx.AsyncClient, names: list[str]
+) -> list[str]:
+    """
+    Of these repositories, the ones that actually have Discussions turned on.
+
+    Worth a request each because the two limits are not the same currency. A
+    repository with Discussions disabled answers a discussion sweep with an
+    empty page and no error, so the cost is a *search* request - 30 a minute,
+    and the thing the run runs out of. This check spends from the core limit
+    instead, which is 5,000 an hour and otherwise idle.
+
+    Measured against one real sweep list: eight of sixteen repositories had
+    Discussions off, so a quarter of that run's discussion budget bought
+    nothing while three phrase queries were cut short for want of it.
+
+    Note that "returned nothing" is the larger set and not the same thing -
+    `langchain-ai/langchain` has Discussions enabled and still matched no
+    posts. Only the ones that *cannot* answer are worth skipping.
+    """
+    headers = {"Accept": "application/vnd.github+json"}
+    if settings.github_token:
+        headers["Authorization"] = f"Bearer {settings.github_token}"
+
+    semaphore = asyncio.Semaphore(8)
+    keep: list[str] = []
+
+    async def one(name: str) -> None:
+        async with semaphore:
+            try:
+                response = await client.get(
+                    f"{REPO_URL}/{name}", headers=headers, follow_redirects=True
+                )
+            except Exception:
+                # Unknown is not the same as off. Keep it and let the sweep
+                # decide, as everywhere else.
+                keep.append(name)
+                return
+            if response.status_code != 200 or response.json().get("has_discussions"):
+                keep.append(name)
+
+    await asyncio.gather(*(one(n) for n in names if n))
+
+    # Caller order, not completion order, so the sweep stays predictable.
+    kept = set(keep)
+    return [n for n in names if n in kept]
+
+
+async def find_repo_candidates(
+    client: httpx.AsyncClient, name: str, min_stars: int = 200, limit: int = 4
+) -> list[dict]:
+    """
+    Repositories that might be a product's own. Best first, empty if unsure.
+
+    Returns several rather than one because the right organisation still has
+    the wrong repository in it: Pinecone's busiest is `pinecone-io/examples`,
+    a folder of notebooks, while the one worth sweeping is `pinecone-io/
+    canopy`, their RAG framework. Name matching cannot tell those apart -
+    only the description can, and that check belongs to the caller, which
+    knows what the product is.
+
+    `find_repos` is the wrong tool for this and fails loudly: it sorts by
+    stars, so it answers "the most popular repository that mentions this
+    word" rather than "the repository called this". Asked for `mem0` it
+    returns a 92,000 star project called claude-mem; asked for `Haystack` it
+    returns funNLP; asked for `LangChain`, markitdown.
+
+    Two changes fix that. `in:name` stops the description and README from
+    matching at all, and the result is then required to *be* the name rather
+    than merely rank first for it.
+
+    ── The owner matters more than the repository ────────────────────────
+
+    Matching only the repository name is still not enough, and Pinecone is
+    the case that proves it. There is no repository called exactly
+    `pinecone` belonging to Pinecone - the company's code lives in
+    `pinecone-io/canopy`, `pinecone-io/python-sdk` and friends. So an exact
+    name rule rejects every correct answer, and then happily accepts
+    `wmww/Pinecone` ("an unmaintained programming language") and
+    `matrix-org/pinecone` ("peer-to-peer overlay routing for the Matrix
+    ecosystem"), because those two genuinely are called that.
+
+    An organisation named after the product is much stronger evidence than a
+    repository that happens to share a word, so owner matches are preferred
+    outright and a name match is only the fallback. Within either group the
+    busiest tracker wins, since issues are the entire reason we want it.
+
+    Returns None rather than a best guess. A wrong repository here is not a
+    near miss - it is a whole sweep spent on a project with no connection to
+    the product, which is worse than the empty slot it filled.
+    """
+    headers = {"Accept": "application/vnd.github+json"}
+    if settings.github_token:
+        headers["Authorization"] = f"Bearer {settings.github_token}"
+
+    response = await client.get(
+        "https://api.github.com/search/repositories",
+        params={
+            "q": f"{name} in:name stars:>={min_stars}",
+            "sort": "stars",
+            "order": "desc",
+            "per_page": 20,
+        },
+        headers=headers,
+    )
+    if response.status_code != 200:
+        return []
+
+    target = _slug(name)
+    by_owner: list[dict] = []
+    by_name: list[dict] = []
+
+    for item in response.json().get("items", []):
+        # The search response carries this, so an archived competitor costs
+        # nothing to avoid here - and costs a whole slot if it gets through.
+        # Both `pinecone-io/canopy` and `weaviate/Verba` were resolved
+        # correctly, added, and then thrown away by the archived check three
+        # steps later, having displaced something usable on the way.
+        if item.get("archived") or item.get("disabled"):
+            continue
+
+        owner, _, short = item["full_name"].partition("/")
+        info = {
+            "full_name": item["full_name"],
+            "description": (item.get("description") or "")[:160],
+            "stars": item.get("stargazers_count", 0),
+            "open_issues": item.get("open_issues_count", 0),
+        }
+        if _is_owner_for(owner, target):
+            by_owner.append(info)
+        elif _slug(short) == target:
+            by_name.append(info)
+
+    # Owner matches outrank name matches, however popular the name match is.
+    pool = by_owner or by_name
+    # Busiest first: issues are the entire reason we want the repository.
+    pool.sort(key=lambda info: -info["open_issues"])
+    return pool[:limit]
+
+
+#: What an organisation adds to a product's name when it registers one.
+#:
+#: The list exists because the obvious rule - does the owner *start with* the
+#: product name - is far too loose on short names, and quietly wrong on long
+#: ones. It matched `zephyrproject-rtos` for "Zep", `haystackeditor` for
+#: "Haystack" and `langchain4j` for "LangChain": three different products,
+#: each stealing the slot belonging to the real one.
+#:
+#: Requiring the remainder to be a corporate suffix keeps `pinecone-io`,
+#: `mem0ai` and `langchain-ai` while rejecting all three of those.
+_OWNER_SUFFIXES = frozenset(
+    {
+        "", "io", "ai", "ml", "hq", "inc", "co", "org", "oss", "dev", "app",
+        "labs", "lab", "team", "tech", "cloud", "systems", "group", "project",
+    }
+)
+
+
+#: And what it puts in front, when the bare name was already taken.
+#:
+#: `getzep`, `getsentry`, `getdbt`, `usebruno` - a standard startup move once
+#: the plain name is gone. Without this, "Zep" skips its own organisation
+#: entirely and matches `Rezonality/zep`, a C++ text editor widget that
+#: happens to be spelled the same.
+_OWNER_PREFIXES = ("get", "use", "try", "go", "the")
+
+
+def _is_owner_for(owner: str, target: str) -> bool:
+    """Is this organisation the one named after the product?"""
+    slug = _slug(owner)
+
+    for prefix in ("", *_OWNER_PREFIXES):
+        if not slug.startswith(prefix + target):
+            continue
+        if slug[len(prefix) + len(target) :] in _OWNER_SUFFIXES:
+            return True
+
+    return False
+
+
+async def find_repo_by_name(
+    client: httpx.AsyncClient, name: str, min_stars: int = 200
+) -> dict | None:
+    """The single best candidate, or None. See `find_repo_candidates`."""
+    found = await find_repo_candidates(client, name, min_stars=min_stars, limit=1)
+    return found[0] if found else None
 
 
 async def repos_by_hits(
@@ -578,7 +936,7 @@ async def search(
 
                 try:
                     added, exhausted = await _fetch_page(
-                        client, query, page, result, seen
+                        client, query, page, result, seen, label
                     )
                 except Exception as exc:
                     log.warning("github.query_failed", label=label, error=str(exc))
@@ -663,12 +1021,17 @@ async def _fetch_page(
     page: int,
     result: SearchResult,
     seen: set[str],
+    label: str = "",
 ) -> tuple[int, bool]:
     """
     One page of one query. Returns (new conversations, nothing left).
 
     "Nothing left" means a short page - GitHub gave us fewer than it could,
     so there is no point asking for the next one.
+
+    `label` is stamped on every conversation this page produced, which is the
+    only moment that association exists - `seen` means a post is credited to
+    the first query that found it and never appears again.
     """
     payload = await _get(client, {"q": query, "per_page": PER_PAGE, "page": page})
     result.requests_made += 1
@@ -697,6 +1060,7 @@ async def _fetch_page(
         if key in seen:
             continue
         seen.add(key)
+        conversation.found_by = label
         result.conversations.append(conversation)
         added += 1
 

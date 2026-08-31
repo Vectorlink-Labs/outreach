@@ -108,7 +108,9 @@ async def ensure_plan(product_id: uuid.UUID, force: bool = False) -> None:
         if part
     )
 
-    for note in await planner.ground_repos(plan, queries, product_text):
+    for note in await planner.ground_repos(
+        plan, queries, product_text, competitors=profile.get("competitors") or []
+    ):
         log.info("plan.repos_grounded", product_id=str(product_id), change=note)
 
     async with session_scope() as session:

@@ -16,9 +16,10 @@ import contextlib
 import uuid
 from datetime import UTC, datetime
 
+import httpx
 import structlog
 
-from outreach import classify, dedupe, rank, score
+from outreach import classify, dedupe, planner, rank, score
 from outreach.config import settings
 from outreach.connectors import github, github_discussions
 from outreach.db.models.product import Product
@@ -194,12 +195,17 @@ async def execute(run_id: str) -> None:
             product = await repo.get(session, product_id)
             if product is None:
                 raise OpportunityError("That product no longer exists.")
-            terms, places = _terms_for(product, run["platform"])
+            terms, places, groups = _terms_for(product, run["platform"])
             # A caller-supplied list wins outright, including an empty
             # one: "search no phrases, only these repositories" is a
             # deliberate and useful thing to ask for.
             if run["terms"] is not None:
                 terms = run["terms"]
+                # A hand-edited list is not grouped, so there is no ontology
+                # left to report coverage against. Reporting the plan's
+                # branches over terms the user replaced would be worse than
+                # reporting nothing: every branch would read as empty.
+                groups = {}
             if run["repos"] is not None:
                 places = run["repos"]
             target = _target_text(product)
@@ -275,12 +281,48 @@ async def execute(run_id: str) -> None:
             _finish(run)
             return
 
+        # Free, and before anything is embedded or read. A repository sweep
+        # takes every recent issue in a repository, and most of what any
+        # repository does is not about us.
+        fetched = len(conversations)
+        conversations, gate_note = classify.gate(conversations, terms)
+        run["notes"].append(gate_note)
+
+        if not conversations:
+            _finish(run)
+            return
+
         _mark(run, "rank", "running")
         conversations = await rank.score_relevance(target, conversations)
         _mark(run, "rank", "done", f"{len(conversations)} read")
 
         ranked = len(conversations)
-        conversations = conversations[:CLASSIFY_TOP]
+        # Held for the coverage report: this is every candidate each problem
+        # actually produced, before the judge limit picks ten of them.
+        candidates = list(conversations)
+
+        # Titles first, cheaply, and only then the expensive judge.
+        #
+        # `triage_pool` caps how much of the ranked list the triage is allowed
+        # to read. See the setting for what a small pool costs; the short
+        # version is that embedding rank and result quality are close to
+        # unrelated here, so a tight pool decides the run before anything has
+        # read a title.
+        pool = conversations
+        if settings.triage_pool:
+            pool = conversations[: settings.triage_pool]
+            if len(conversations) > len(pool):
+                run["notes"].append(
+                    f"triage pool: reading the top {len(pool)} of "
+                    f"{len(conversations)} by embedding score. The other "
+                    f"{len(conversations) - len(pool)} are not read at all - "
+                    f"raise TRIAGE_POOL to widen this."
+                )
+
+        conversations, triage_notes = await classify.triage(
+            target, pool, CLASSIFY_TOP
+        )
+        run["notes"].extend(triage_notes)
 
         # The whole funnel on one line.
         #
@@ -293,7 +335,8 @@ async def execute(run_id: str) -> None:
         run["notes"].append(
             f"funnel: {len(issues.conversations)} issues + "
             f"{len(discussions.conversations)} discussions "
-            f"-> {ranked} after duplicates -> {len(conversations)} classified"
+            f"-> {fetched} after duplicates -> {ranked} through the gate "
+            f"-> {len(conversations)} judged"
         )
 
         _mark(run, "judge", "running")
@@ -301,9 +344,15 @@ async def execute(run_id: str) -> None:
         run["notes"].extend(notes)
         _mark(run, "judge", "done", f"{len(conversations)} judged")
 
+        await _attach_reach(conversations)
+
         conversations = score.apply(conversations)
         run["results"] = [_to_dict(c, i + 1) for i, c in enumerate(conversations)]
         _mark(run, "score", "done", f"{len(conversations)} scored")
+
+        coverage = _coverage(candidates, conversations, groups)
+        if coverage:
+            run["notes"].append(coverage)
 
         _finish(run)
 
@@ -331,6 +380,19 @@ async def _discussions(
     reason always lands in the notes, so a silent zero is still explained.
     """
     try:
+        # Drop the repositories with Discussions turned off before spending
+        # a search request discovering it. They answer with an empty page and
+        # no error, so the budget goes and nothing comes back.
+        if places:
+            async with httpx.AsyncClient(timeout=settings.http_timeout_seconds) as c:
+                usable = await github.repos_with_discussions(c, places)
+            if len(usable) < len(places):
+                run["notes"].append(
+                    f"discussions: skipped {len(places) - len(usable)} of "
+                    f"{len(places)} repositories that have Discussions turned off"
+                )
+            places = usable
+
         return await github_discussions.search(
             terms,
             repos=places,
@@ -349,31 +411,142 @@ async def _discussions(
         )
 
 
-def _terms_for(product: Product, platform: str) -> tuple[list[str], list[str]]:
+def _terms_for(
+    product: Product, platform: str
+) -> tuple[list[str], list[str], dict[str, list[str]]]:
     """
-    The plan's search terms for this platform.
+    The plan's search terms for this platform, and the problems they belong to.
 
     Falls back to the profile's pain words when the plan has none. Those are
     the phrases somebody with the problem types, which is exactly what a
     keyword search needs, so an empty plan is recoverable rather than fatal.
+
+    The third value is empty for a plan written before the ontology existed.
+    Everything downstream treats that as "no coverage report", not as an
+    error - an old plan still searches perfectly well.
     """
     if product.plan:
         try:
             plan = MarketingPlan(**product.plan)
             for entry in plan.platforms:
                 if entry.key == platform:
-                    return list(entry.search_terms), list(entry.target_places)
+                    return (
+                        list(entry.search_terms),
+                        list(entry.target_places),
+                        dict(entry.term_groups),
+                    )
         except Exception:
             log.warning("opportunity.plan_unreadable", product_id=str(product.id))
 
     if product.profile:
         try:
             pain = Profile(**product.profile).pain_words
-            return pain[:8], []
+            return pain[:8], [], {}
         except Exception:
             pass
 
-    return [], []
+    return [], [], {}
+
+
+async def _attach_reach(conversations: list[Conversation]) -> None:
+    """
+    Fill in how big each result's repository is, for the reach score.
+
+    Runs on the judged handful rather than on everything fetched, and the
+    counts are cached between runs, so this is usually free and never more
+    than a few requests. It also sits on the 5,000-per-hour core limit rather
+    than the 30-per-minute search limit, so it cannot slow a search down.
+
+    Failure is silently survivable: an unknown count scores as average, which
+    is the honest answer when we could not look it up.
+    """
+    names = sorted({c.container for c in conversations if c.container})
+    if not names:
+        return
+
+    try:
+        async with httpx.AsyncClient(timeout=settings.http_timeout_seconds) as client:
+            stars = await github.repo_stars(client, names)
+    except Exception as exc:
+        log.warning("opportunity.stars_failed", error=str(exc))
+        return
+
+    for conversation in conversations:
+        count = stars.get(conversation.container or "", -1)
+        if count >= 0:
+            conversation.repo_stars = count
+
+
+def _tally(
+    conversations: list[Conversation], groups: dict[str, list[str]]
+) -> tuple[dict[str, int], int]:
+    """How many of these came from each problem, and how many from sweeps."""
+    branch_of = planner.branch_of(groups)
+    counts = {name: 0 for name in groups}
+    swept = 0
+
+    for conversation in conversations:
+        label = conversation.found_by or ""
+        if label.startswith("phrase: "):
+            name = branch_of.get(label.removeprefix("phrase: ").lower())
+            if name in counts:
+                counts[name] += 1
+        elif label.startswith("repo: "):
+            # Repository sweeps carry no phrase, so they belong to no branch.
+            # Counted separately rather than dropped: they are usually the
+            # best source in the run, and a coverage line that silently
+            # omitted them would understate it badly.
+            swept += 1
+
+    return counts, swept
+
+
+def _coverage(
+    fetched: list[Conversation],
+    results: list[Conversation],
+    groups: dict[str, list[str]],
+) -> str | None:
+    """
+    What each problem in the plan found, and what survived to the results.
+    None when there is no ontology to report against.
+
+    ── Why this is worth a line of its own ──────────────────────────────────
+
+    A run that searched five problems and returned results for one looks
+    exactly like a run where only one problem exists in the market. Both show
+    a list of good posts about caching. The difference is the whole story, and
+    without this nobody ever sees it - the results are individually correct,
+    so there is nothing to notice.
+
+    ── Why both numbers, and not just the results ───────────────────────────
+
+    Because a zero means two completely different things and the fix is
+    opposite in each. `95 -> 0` is a problem that found plenty and lost the
+    race for a judge slot: raise the limit, or narrow the others. `0 -> 0` is
+    a problem nothing matched at all: the terms for it are wrong.
+
+    Reporting only the results collapses those two into one number and sends
+    you to rewrite terms that were working.
+    """
+    if not groups:
+        return None
+
+    found, found_swept = _tally(fetched, groups)
+    kept, kept_swept = _tally(results, groups)
+
+    parts = [f"{name} {found[name]}->{kept[name]}" for name in groups]
+    if found_swept or kept_swept:
+        parts.append(f"repo sweeps {found_swept}->{kept_swept}")
+
+    line = "coverage (found -> judged): " + " · ".join(parts)
+
+    unmatched = [name for name in groups if found[name] == 0]
+    if unmatched:
+        line += (
+            f" — {', '.join(unmatched)} matched nothing at all, so those terms "
+            f"are wrong rather than that problem being rare."
+        )
+    return line
 
 
 def _target_text(product: Product) -> str:
