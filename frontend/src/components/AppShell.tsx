@@ -18,7 +18,9 @@ import Typography from "@mui/material/Typography";
 import DarkModeOutlinedIcon from "@mui/icons-material/DarkModeOutlined";
 import LightModeOutlinedIcon from "@mui/icons-material/LightModeOutlined";
 
+import ProductSwitcher from "./ProductSwitcher";
 import { useAuth } from "@/lib/auth";
+import { useSelectedProduct } from "@/lib/selectedProduct";
 
 interface Props {
   mode: "light" | "dark";
@@ -28,6 +30,7 @@ interface Props {
 
 export default function AppShell({ mode, onToggleMode, children }: Props) {
   const { user, logOut } = useAuth();
+  const { selected } = useSelectedProduct();
   const navigate = useNavigate();
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
 
@@ -63,19 +66,27 @@ export default function AppShell({ mode, onToggleMode, children }: Props) {
             gap: 1,
           }}
         >
-          <Typography
-            component={RouterLink}
-            to="/home"
-            variant="subtitle2"
-            sx={{
-              justifySelf: "start",
-              fontWeight: 700,
-              color: "text.primary",
-              textDecoration: "none",
-            }}
+          <Stack
+            direction="row"
+            spacing={1.5}
+            alignItems="center"
+            sx={{ justifySelf: "start", minWidth: 0 }}
           >
-            Outreach
-          </Typography>
+            <Typography
+              component={RouterLink}
+              to="/home"
+              variant="subtitle2"
+              sx={{
+                fontWeight: 700,
+                color: "text.primary",
+                textDecoration: "none",
+                flexShrink: 0,
+              }}
+            >
+              Outreach
+            </Typography>
+            <ProductSwitcher />
+          </Stack>
 
           <Stack direction="row" spacing={1} sx={{ justifySelf: "center" }}>
             <Button component={RouterLink} to="/home" size="small" color="inherit">
@@ -139,6 +150,31 @@ export default function AppShell({ mode, onToggleMode, children }: Props) {
             </Menu>
           </Stack>
         </Toolbar>
+
+        {/* What the selected product is, in its owner's words.
+            A second row rather than squeezed into the toolbar: descriptions
+            run to a paragraph, and truncating one to fit beside a name
+            leaves three words and an ellipsis, which tells nobody anything. */}
+        {selected?.description && (
+          <>
+            <Divider />
+            <Box sx={{ px: { xs: 2, sm: 3 }, py: 0.75, bgcolor: "action.hover" }}>
+              <Typography
+                variant="caption"
+                sx={{
+                  color: "text.secondary",
+                  display: "-webkit-box",
+                  WebkitLineClamp: 2,
+                  WebkitBoxOrient: "vertical",
+                  overflow: "hidden",
+                  lineHeight: 1.5,
+                }}
+              >
+                {selected.description}
+              </Typography>
+            </Box>
+          </>
+        )}
       </AppBar>
 
       {children}

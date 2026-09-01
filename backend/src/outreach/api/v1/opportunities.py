@@ -9,12 +9,14 @@ on a platform card and the agent's own terms are what run.
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, status
 from pydantic import BaseModel
 
 from outreach.api.deps import CurrentUser, DbSession
 from outreach.db.repositories import products as repo
+from outreach.db.repositories import search_runs as run_repo
 from outreach.services import opportunity_service as svc
 
 router = APIRouter(tags=["opportunities"])
@@ -77,14 +79,14 @@ async def start(
 @router.get("/opportunities/{run_id}")
 async def get_run(run_id: str, user: CurrentUser, session: DbSession) -> dict:
     """
-    Progress and results.
+    Progress and results, for a live run or one from months ago.
 
     Ownership is re-checked on every poll rather than trusted from the start
     call, because a run id in a URL is otherwise a way to read somebody
     else's results.
     """
     try:
-        run = svc.get(run_id)
+        run = await svc.load(session, run_id)
     except svc.OpportunityError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
 
@@ -93,3 +95,65 @@ async def get_run(run_id: str, user: CurrentUser, session: DbSession) -> dict:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No run with that id.")
 
     return run
+
+
+@router.get("/products/{product_id}/last-search")
+async def last_search(
+    product_id: uuid.UUID, user: CurrentUser, session: DbSession
+) -> dict | None:
+    """
+    The most recent search for this product, or null if there has never been one.
+
+    Null rather than 404: "you have not searched yet" is an ordinary state
+    for a new product, and making the home page treat it as an error would
+    put a red box on the screen every time somebody adds one.
+    """
+    product = await repo.get_owned(session, product_id, user.id)
+    if product is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No product with that id.")
+
+    return await svc.latest(session, product_id)
+
+
+class SearchSummary(BaseModel):
+    """One line of history. Deliberately without the results."""
+
+    id: str
+    platform: str
+    state: str
+    result_count: int
+    top_score: int
+    started_at: datetime
+    finished_at: datetime | None
+
+
+@router.get("/products/{product_id}/searches", response_model=list[SearchSummary])
+async def search_history(
+    product_id: uuid.UUID, user: CurrentUser, session: DbSession, limit: int = 20
+) -> list[SearchSummary]:
+    """
+    Every search run for this product, newest first.
+
+    Summaries only. A run carries its full results as JSONB and ten of them
+    is megabytes, which is a slow request to render a list of dates and
+    counts. Opening one fetches that run in full.
+    """
+    product = await repo.get_owned(session, product_id, user.id)
+    if product is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No product with that id.")
+
+    rows = await run_repo.list_for_product(session, product_id, limit=limit)
+    return [
+        SearchSummary(
+            id=row.id,
+            platform=row.platform,
+            # An interrupted run is reported as failed here too, so the
+            # history never shows a spinner for something nobody is doing.
+            state="failed" if run_repo.is_lost(row) else row.state,
+            result_count=row.result_count,
+            top_score=row.top_score,
+            started_at=row.started_at,
+            finished_at=row.finished_at,
+        )
+        for row in rows
+    ]

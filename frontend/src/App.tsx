@@ -6,6 +6,7 @@ import { ThemeProvider } from "@mui/material/styles";
 
 import AppShell from "@/components/AppShell";
 import { AuthProvider, RequireAuth } from "@/lib/auth";
+import { SelectedProductProvider } from "@/lib/selectedProduct";
 import BriefsRoute from "@/routes/briefs";
 import HomeRoute from "@/routes/home";
 import LandingRoute from "@/routes/landing";
@@ -53,12 +54,16 @@ export default function App() {
             <Route path="/login" element={<LoginRoute />} />
 
             {/* ---------------------------------------------- private */}
+            {/* The provider sits inside RequireAuth, so the product list is
+                only ever fetched for somebody who is signed in. */}
             <Route
               element={
                 <RequireAuth>
-                  <AppShell mode={mode} onToggleMode={toggle}>
-                    <Outlet />
-                  </AppShell>
+                  <SelectedProductProvider>
+                    <AppShell mode={mode} onToggleMode={toggle}>
+                      <Outlet />
+                    </AppShell>
+                  </SelectedProductProvider>
                 </RequireAuth>
               }
             >

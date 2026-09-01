@@ -5,8 +5,12 @@ This is the join between the two halves of the product. The planner decided
 what to look for; this executes it and scores what comes back. The user never
 types a keyword.
 
-Runs are held in memory, like the rest of the run machinery. Same trade, same
-consequence: a restart loses them.
+A run in flight lives in `RUNS`, because progress changes several times a
+second and a row per tick would be a write every two seconds for nothing.
+It is written to `search_run` twice: once when it starts, so an interrupted
+search still leaves a trace, and once when it reaches a final state. Reads
+check memory first and fall back to the table, so a run from last week opens
+the same way as one from a minute ago.
 """
 
 from __future__ import annotations
@@ -18,12 +22,14 @@ from datetime import UTC, datetime
 
 import httpx
 import structlog
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from outreach import classify, dedupe, planner, rank, score
 from outreach.config import settings
 from outreach.connectors import github, github_discussions
 from outreach.db.models.product import Product
 from outreach.db.repositories import products as repo
+from outreach.db.repositories import search_runs as run_repo
 from outreach.db.session import session_scope
 from outreach.planner import MarketingPlan
 from outreach.profile import Profile
@@ -149,11 +155,48 @@ def start(
     return run_id
 
 
-def get(run_id: str) -> dict:
+async def load(session: AsyncSession, run_id: str) -> dict:
+    """
+    A run, from memory if it is live and from the table if it is not.
+
+    Memory first because a run in flight is updated many times a second and
+    the table only sees it at the start and at the end. The stored copy of a
+    live run is deliberately behind.
+    """
     run = RUNS.get(run_id)
-    if run is None:
-        raise OpportunityError("No run with that id. It may have been lost on a restart.")
-    return run
+    if run is not None:
+        return run
+
+    row = await run_repo.get(session, run_id)
+    if row is None:
+        raise OpportunityError("No search with that id.")
+    return run_repo.to_dict(row)
+
+
+async def latest(session: AsyncSession, product_id: uuid.UUID) -> dict | None:
+    """The most recent search for a product, or None if there has never been one."""
+    row = await run_repo.latest_for_product(session, product_id)
+    if row is None:
+        return None
+
+    # A live run is fresher than its row, which was written when it started.
+    live = RUNS.get(row.id)
+    return live if live is not None else run_repo.to_dict(row)
+
+
+async def _persist(run: dict) -> None:
+    """
+    Write the run to the table, never failing the run in order to do it.
+
+    A search that found ten good leads and then could not save them should
+    still show the ten leads. Losing the durable copy costs the history, not
+    the result the user is currently looking at.
+    """
+    try:
+        async with session_scope() as session:
+            await run_repo.save(session, run)
+    except Exception:
+        log.exception("opportunity.persist_failed", run_id=run.get("id"))
 
 
 async def execute(run_id: str) -> None:
@@ -162,6 +205,11 @@ async def execute(run_id: str) -> None:
     run["state"] = "running"
 
     product_id = uuid.UUID(run["product_id"])
+
+    # Written once up front so an interrupted run leaves a trace. Without
+    # this a server restart mid-search loses the fact that it happened at
+    # all, and the last-search card silently shows the run before it.
+    await _persist(run)
 
     try:
         # Rewrite the plan first if it has gone out of date.
@@ -363,6 +411,12 @@ async def execute(run_id: str) -> None:
         for stage in run["stages"]:
             if stage["state"] == "running":
                 stage["state"] = "skipped"
+
+    finally:
+        # In a finally, not after `_finish`, because the happy path has
+        # several early returns in it - an empty fetch, an empty gate - and
+        # those are exactly the runs worth remembering having done.
+        await _persist(run)
 
 
 # ---------------------------------------------------------------- internals

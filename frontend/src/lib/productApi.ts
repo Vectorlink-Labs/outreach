@@ -398,6 +398,25 @@ export const productApi = {
   },
 
   /**
+   * The most recent search for a product, or null if it has never been
+   * searched.
+   *
+   * Null is a state, not a failure: a product added a minute ago has never
+   * been searched, and that is the normal case rather than an error.
+   */
+  async lastSearch(productId: string): Promise<OpportunityRun | null> {
+    return request<OpportunityRun | null>(`/products/${productId}/last-search`);
+  },
+
+  /**
+   * Every past search, newest first. Summaries only — opening one fetches
+   * that run's results.
+   */
+  async searchHistory(productId: string): Promise<SearchSummary[]> {
+    return request<SearchSummary[]>(`/products/${productId}/searches`);
+  },
+
+  /**
    * Repositories GitHub actually has for a topic.
    *
    * The planner names these from memory, which produces renamed projects,
@@ -459,8 +478,22 @@ export interface OpportunityStage {
   detail: string | null;
 }
 
+/** One line of search history. The results are not in it; opening one loads them. */
+export interface SearchSummary {
+  id: string;
+  platform: string;
+  state: "queued" | "running" | "succeeded" | "failed";
+  result_count: number;
+  top_score: number;
+  started_at: string;
+  finished_at: string | null;
+}
+
 export interface OpportunityRun {
   id: string;
+  /** Which product it searched for. The only way back when a run is
+      reopened from a link that carries nothing but the run id. */
+  product_id: string;
   platform: string;
   state: "queued" | "running" | "succeeded" | "failed";
   stages: OpportunityStage[];
@@ -470,6 +503,9 @@ export interface OpportunityRun {
   notes: string[];
   results: Opportunity[];
   error: string | null;
+  /** Present on a run loaded from the database; absent on a live one. */
+  started_at?: string;
+  finished_at?: string | null;
 }
 
 /** True while the crawl is still going, so the screen knows to keep polling. */
