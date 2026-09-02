@@ -50,6 +50,8 @@ export default function HomeRoute() {
   const { products, selected, loading, error } = useSelectedProduct();
 
   const [run, setRun] = useState<OpportunityRun | null>(null);
+  /** The last search that produced something, when the newest one failed. */
+  const [fallback, setFallback] = useState<OpportunityRun | null>(null);
   const [history, setHistory] = useState<SearchSummary[]>([]);
   const [runError, setRunError] = useState<string | null>(null);
   const [loadingRun, setLoadingRun] = useState(false);
@@ -78,6 +80,22 @@ export default function HomeRoute() {
         setRun(found);
         setHistory(past);
         setRunError(null);
+
+        /* One bad click should not hide ten good leads.
+         *
+         * "Latest" is sometimes a failure, and the results from the search
+         * before it are still there - they simply stopped being the newest
+         * thing. Fall back to the last search that produced something, so
+         * the failure is reported without the work disappearing with it. */
+        if (found && found.state === "failed") {
+          const good = past.find((h) => h.state === "succeeded" && h.result_count > 0);
+          if (good) {
+            const recovered = await productApi.opportunityRun(good.id);
+            if (!cancelled) setFallback(recovered);
+          }
+        } else if (!cancelled) {
+          setFallback(null);
+        }
         // Keep watching only while something is actually happening.
         if (found && (found.state === "queued" || found.state === "running")) {
           timer = window.setTimeout(() => void fetchOnce(), POLL_MS);
@@ -141,7 +159,10 @@ export default function HomeRoute() {
   }
 
   const running = run?.state === "queued" || run?.state === "running";
-  const results = run?.results ?? [];
+  // Whichever run actually has results in it, which after a failure is not
+  // the newest one.
+  const shown = fallback ?? run;
+  const results = shown?.results ?? [];
   const top = results.slice(0, PREVIEW);
 
   return (
@@ -237,9 +258,11 @@ export default function HomeRoute() {
               </Stack>
             </Box>
 
+            {/* `shown`, not `run`. After a failure they are different runs,
+                and pointing at the failed one opens an empty screen. */}
             <Button
               component={RouterLink}
-              to={`/opportunities?run=${run.id}`}
+              to={`/opportunities?run=${(shown ?? run).id}`}
               endIcon={<ArrowForwardIcon />}
               sx={{ flexShrink: 0 }}
             >

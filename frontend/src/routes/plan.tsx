@@ -13,7 +13,6 @@ import Typography from "@mui/material/Typography";
 
 import AutoAwesomeIcon from "@mui/icons-material/AutoAwesome";
 import EventNoteIcon from "@mui/icons-material/EventNoteOutlined";
-import FlagIcon from "@mui/icons-material/OutlinedFlag";
 import LightbulbIcon from "@mui/icons-material/LightbulbOutlined";
 import PeopleIcon from "@mui/icons-material/PeopleAltOutlined";
 import RefreshIcon from "@mui/icons-material/Refresh";
@@ -21,7 +20,9 @@ import RouteIcon from "@mui/icons-material/RouteOutlined";
 import CampaignIcon from "@mui/icons-material/CampaignOutlined";
 
 import { ErrorBlock, Loading } from "@/components/StateBlocks";
+import LatestResults from "@/features/plan/LatestResults";
 import PlatformCard from "@/features/plan/PlatformCard";
+import ProductBrief from "@/features/plan/ProductBrief";
 import {
   productApi,
   type PlanPlatform,
@@ -288,36 +289,29 @@ export default function PlanRoute() {
             <Pillar icon={<CampaignIcon />} title="How to describe it" body={plan.positioning} />
           </Paper>
 
-          {product?.goal && (
-            <Stack
-              direction="row"
-              gap={1.5}
-              sx={{
-                px: 2,
-                py: 1.5,
-                borderRadius: 2,
-                borderLeft: 3,
-                borderColor: "primary.main",
-                bgcolor: "action.hover",
-              }}
-            >
-              <FlagIcon sx={{ fontSize: 18, color: "primary.main", mt: 0.25, flexShrink: 0 }} />
-              <Box>
-                <Typography
-                  variant="overline"
-                  sx={{
-                    display: "block",
-                    fontSize: 10,
-                    letterSpacing: ".1em",
-                    color: "text.secondary",
-                    lineHeight: 1.6,
-                  }}
-                >
-                  Your goal
-                </Typography>
-                <Typography variant="body2">{product.goal}</Typography>
-              </Box>
-            </Stack>
+          {/* Editable, and above the plan rather than beside it: these two
+              fields are what the plan is generated *from*, so reading them
+              after the plan puts the cause after the effect. */}
+          {product && (
+            <ProductBrief
+              product={product}
+              stale={result?.stale ?? false}
+              onSaved={load}
+              onRewrite={() => write(true)}
+            />
+          )}
+
+          {/* The plan and what it found, on one screen. Searching again is
+              deliberately separate from rewriting the plan: one asks "has
+              anything new been posted", the other "are we looking for the
+              right thing", and they are rarely the same question. */}
+          {ready.length > 0 && (
+            <LatestResults
+              productId={productId}
+              onSearch={() =>
+                findOpportunities(ready[0], ready[0].searchTerms, ready[0].targetPlaces)
+              }
+            />
           )}
 
           {/* One card, full width, laid out in two columns internally. The

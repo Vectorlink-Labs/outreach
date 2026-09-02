@@ -1193,6 +1193,36 @@ async def _run_one(
     return added
 
 
+#: Smallest gap between two search requests.
+#:
+#: ── Why paying a second per request is cheaper than not ──────────────────
+#:
+#: GitHub has a second, undocumented-by-number limit beside the 30 per
+#: minute: a *secondary* limit that fires when requests arrive too fast
+#: together, however much primary quota is left. It answers 403 with no
+#: rate-limit headers at all, which is why `_retry_after` falls back to a
+#: flat minute for it.
+#:
+#: A real run tripped it three times and spent three minutes asleep out of
+#: six. Spacing 58 requests a second apart costs 58 seconds instead, and
+#: that time is spent fetching rather than waiting - so the run gets both
+#: faster and more complete.
+SEARCH_SPACING_SECONDS = 1.0
+
+_pace_lock = asyncio.Lock()
+_last_search_at = 0.0
+
+
+async def _pace() -> None:
+    """Hold the caller until a request may be sent without crowding."""
+    global _last_search_at
+    async with _pace_lock:
+        since = time.monotonic() - _last_search_at
+        if since < SEARCH_SPACING_SECONDS:
+            await asyncio.sleep(SEARCH_SPACING_SECONDS - since)
+        _last_search_at = time.monotonic()
+
+
 async def _get(client: httpx.AsyncClient, params: dict) -> dict:
     """
     One request, waiting as long as GitHub asks when it says to wait.
@@ -1205,6 +1235,7 @@ async def _get(client: httpx.AsyncClient, params: dict) -> dict:
         headers["Authorization"] = f"Bearer {settings.github_token}"
 
     for attempt in range(3):
+        await _pace()
         try:
             response = await client.get(SEARCH_URL, params=params, headers=headers)
         except (httpx.TransportError, httpx.RemoteProtocolError) as exc:

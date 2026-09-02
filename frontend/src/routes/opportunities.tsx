@@ -29,14 +29,41 @@ import { MONO } from "@/styles/theme";
 
 const POLL_MS = 2000;
 
+/**
+ * How long to wait before saying something is wrong.
+ *
+ * Two different waits, because the two silences mean different things. No
+ * reply at all is nearly always the backend having restarted under the
+ * request, and thirty seconds is already far past normal. A run that IS
+ * answering but has not finished is merely slow - a big fetch against
+ * GitHub's rate limit genuinely takes minutes - so that one waits much
+ * longer before casting doubt on itself.
+ */
+const NO_REPLY_MS = 30_000;
+const TOO_LONG_MS = 6 * 60_000;
+
 export default function OpportunitiesRoute() {
   const [params] = useSearchParams();
   const productId = params.get("product") ?? "";
   const platform = params.get("platform") ?? "github";
-  // "|" rather than "," because a repository name never contains one and
-  // a search phrase easily might.
-  const split = (key: string) =>
-    (params.get(key) ?? "").split("|").map((s) => s.trim()).filter(Boolean);
+  /* "|" rather than "," because a repository name never contains one and a
+   * search phrase easily might.
+   *
+   * `undefined` when the parameter is absent, and that distinction is the
+   * whole point. The server reads a missing list as "use whatever the plan
+   * says" and an empty list as "search nothing, deliberately" - which is a
+   * real thing to ask for, as in "these repositories only, no phrases".
+   *
+   * Returning `[]` for an absent parameter collapsed the two. The home
+   * page's Search again button links here without terms, the empty array
+   * overrode a perfectly good plan of nine phrases and twenty repositories,
+   * and the run died with "The plan has no search terms for this platform"
+   * against a plan that had plenty. */
+  const split = (key: string): string[] | undefined => {
+    const raw = params.get(key);
+    if (raw === null) return undefined;
+    return raw.split("|").map((s) => s.trim()).filter(Boolean);
+  };
   const terms = split("terms");
   const repos = split("repos");
 
@@ -63,27 +90,50 @@ export default function OpportunitiesRoute() {
     ? `open:${existingRunId}`
     : `start:${productId}:${platform}`;
   const actedOn = useRef("");
+  const pollRef = useRef<number | undefined>(undefined);
 
   useEffect(() => {
     if (actedOn.current === requestKey) return;
     if (!existingRunId && !productId) return;
     actedOn.current = requestKey;
 
-    let poll: number | undefined;
-    let cancelled = false;
+    /* Staleness is decided by comparing the request, never by a flag the
+     * cleanup sets.
+     *
+     * A `cancelled` boolean is the obvious way to write this and it is
+     * broken here, because React runs effects twice in development. Pass one
+     * would start the work, the cleanup between the passes would set
+     * `cancelled`, pass two would take the guard above and return without
+     * doing anything, and pass one's answer would then arrive and be thrown
+     * away for being "cancelled". Nothing ever called `setRun`, so `run`
+     * stayed null - and this screen shows the progress card whenever `run`
+     * is null, which is why reopening a finished search looked exactly like
+     * starting a new one.
+     *
+     * Comparing `actedOn` instead makes the double pass harmless: it still
+     * refers to this request, so the answer is kept. Only a genuine change
+     * of query string moves it, and that is the one case where an in-flight
+     * answer really is stale. */
+    const mine = requestKey;
+    const stillMine = () => actedOn.current === mine;
 
     const watch = (runId: string) => {
-      poll = window.setInterval(async () => {
+      window.clearInterval(pollRef.current);
+      pollRef.current = window.setInterval(async () => {
+        if (!stillMine()) {
+          window.clearInterval(pollRef.current);
+          return;
+        }
         try {
           const next = await productApi.opportunityRun(runId);
-          if (cancelled) return;
+          if (!stillMine()) return;
           setRun(next);
           if (next.state === "succeeded" || next.state === "failed") {
-            window.clearInterval(poll);
+            window.clearInterval(pollRef.current);
           }
         } catch (e) {
-          window.clearInterval(poll);
-          if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+          window.clearInterval(pollRef.current);
+          if (stillMine()) setError(e instanceof Error ? e.message : String(e));
         }
       }, POLL_MS);
     };
@@ -97,7 +147,7 @@ export default function OpportunitiesRoute() {
           // Reopening. This must never start a search - it is how the home
           // page links to a result somebody already paid for.
           const found = await productApi.opportunityRun(existingRunId);
-          if (cancelled) return;
+          if (!stillMine()) return;
           setRun(found);
           if (found.state !== "succeeded" && found.state !== "failed") {
             watch(existingRunId);
@@ -111,18 +161,17 @@ export default function OpportunitiesRoute() {
           terms,
           repos,
         );
-        if (cancelled) return;
+        if (!stillMine()) return;
         watch(runId);
       } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+        if (stillMine()) setError(e instanceof Error ? e.message : String(e));
       }
     })();
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(poll);
-    };
   }, [productId, platform, existingRunId, requestKey]);
+
+  // The interval outlives the effect that created it, so it is cleared on
+  // unmount rather than between the development double-pass.
+  useEffect(() => () => window.clearInterval(pollRef.current), []);
 
   const results = run?.results ?? [];
   const strong = results.filter((r) => r.score >= WEAK_BELOW);
@@ -133,6 +182,20 @@ export default function OpportunitiesRoute() {
   // already finished is not, and showing it the progress card made a saved
   // result look exactly like a search starting from scratch.
   const live = !run || run.state === "queued" || run.state === "running";
+
+  // Has it gone quiet for longer than it should have?
+  const [waitedMs, setWaitedMs] = useState(0);
+  useEffect(() => {
+    if (!live) {
+      setWaitedMs(0);
+      return;
+    }
+    const started = Date.now();
+    const tick = window.setInterval(() => setWaitedMs(Date.now() - started), POLL_MS);
+    return () => window.clearInterval(tick);
+  }, [live, requestKey]);
+
+  const silent = live && waitedMs > (run ? TOO_LONG_MS : NO_REPLY_MS);
 
   // The URL only carries a platform when a search is being started. Reopened
   // by id it does not, and the page said "GitHub" for every run regardless
@@ -152,16 +215,20 @@ export default function OpportunitiesRoute() {
       }}
     >
       <Box>
+        {/* Which product this belongs to is not always known yet.
+            Reopening by run id carries no product in the URL, so until the
+            run loads there is nothing to go back *to* - and building the
+            link anyway produced "/products//plan", which matches no route
+            and falls through to the catch-all redirect to the landing page.
+            Home is a truthful destination while we do not know better. */}
         <Button
           component={RouterLink}
-          // Empty when a run was reopened by id, so fall back to what the
-          // run itself says it searched for.
-          to={`/products/${backTo}/plan`}
+          to={backTo ? `/products/${backTo}/plan` : "/home"}
           startIcon={<ArrowBackIcon />}
           size="small"
           sx={{ mb: 1 }}
         >
-          Back to the plan
+          {backTo ? "Back to the plan" : "Back"}
         </Button>
 
         <Stack
@@ -247,9 +314,33 @@ export default function OpportunitiesRoute() {
               ))}
             </Stack>
             <Typography variant="caption" color="text.secondary" sx={{ mt: 2, display: "block" }}>
-              This takes 30 to 90 seconds. GitHub is slow, and every result is
-              read twice — once for meaning, once for intent.
+              A few minutes. GitHub is rate limited, every candidate's title is
+              read, and the best of them are read in full.
             </Typography>
+
+            {/* A search whose first reply never arrives used to spin here for
+                ever: the card shows whenever there is no run yet, and "no run
+                yet" and "no answer ever" looked identical. Restarting the
+                backend mid-search is enough to cause it, and the search
+                itself usually finished perfectly well server-side. */}
+            {silent && (
+              <Alert
+                severity="warning"
+                sx={{ mt: 2 }}
+                action={
+                  <Button
+                    size="small"
+                    onClick={() => window.location.reload()}
+                  >
+                    Reload
+                  </Button>
+                }
+              >
+                {run
+                  ? "This has been running much longer than usual. It may still finish — the results are saved either way, so reloading is safe."
+                  : "No reply from the backend yet. If it was restarted, the search may already have finished and been saved. Reload to check."}
+              </Alert>
+            )}
           </CardContent>
         </Card>
       )}

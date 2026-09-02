@@ -28,6 +28,26 @@ class ProductCreate(BaseModel):
     goal: str | None = Field(default=None, max_length=2000)
 
 
+class ProductUpdate(BaseModel):
+    """
+    Body of PATCH /api/v1/products/{id}. Every field optional.
+
+    Only three fields, and deliberately not the URL. Changing the address
+    means a different website, so it is a different product - allowing it
+    here would leave a row whose crawl, profile and plan all describe
+    somewhere else, with nothing to say so.
+
+    Changing `description` or `goal` makes the plan stale, because both are
+    hashed into `plan_source_hash`. That is the point: the two are what the
+    planner reads, so editing them and keeping the old plan would mean the
+    search still hunts for whatever the first draft said.
+    """
+
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    description: str | None = Field(default=None, max_length=4000)
+    goal: str | None = Field(default=None, max_length=2000)
+
+
 class ProductPageOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

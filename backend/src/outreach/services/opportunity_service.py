@@ -95,20 +95,31 @@ MAX_DISCUSSION_REQUESTS = 30
 #: keeps the run inside its limit.
 REPLAN_REQUEST_COST = 12
 
-#: How many of the best-ranked results get read by the model.
+#: How many of the triage's picks get read in full and scored.
 #:
-#: Was 25, and 25 was the bottleneck in the whole pipeline. A run fetches on
-#: the order of a thousand candidates, ranks them by embedding similarity
-#: against a paragraph describing the product, and used to read the top
-#: twenty-five. But embeddings sort by *topic*, and every post in the fetch
-#: is on the topic - that is why it was fetched. "RAG retrieval breaks my
-#: prompt cache" and two hundred generic posts about caching land within a
-#: few points of each other, so the lead we wanted sat somewhere around rank
-#: seventy and was never read at all.
+#: This number used to carry the whole selection problem and had to be large
+#: because of it: the stage before it sorted by embedding similarity, which
+#: is flat across the results that matter, so the only way to reach a good
+#: lead was to read deep enough to trip over it.
 #:
-#: The classifier is the only stage that can tell those apart, and it costs
-#: about $0.0002 a post. Reading 140 instead of 25 costs roughly three cents
-#: a run, and most of them come back from the cache anyway.
+#: The triage changed what this number means. Titles are now read for all
+#: candidates and ranked by whether something is *happening*, so what arrives
+#: here is already chosen rather than merely near the top of a topic. A
+#: smaller, sharper set is the right shape for the expensive stage.
+#:
+#: Ten by decision, to hold the per-run token spend down.
+#:
+#: This is a much safer number than it used to be, and the reason is worth
+#: keeping: it is only affordable because `triage_pool` is 0. Titles are read
+#: for every candidate, so the ten that arrive here are ten the triage picked
+#: out of thousands. Back when the pool was capped the same ten were whatever
+#: happened to rank highest by embedding similarity, which is flat across the
+#: results that matter - the two are not comparable, however identical the
+#: number looks.
+#:
+#: Watch the run notes rather than this line. The triage reports how many
+#: scored a clear match and were cut by this limit; while that number is
+#: zero, ten is genuinely enough, and when it is not, it says so.
 CLASSIFY_TOP = 10
 
 

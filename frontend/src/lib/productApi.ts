@@ -329,6 +329,26 @@ export const productApi = {
     return toProduct(raw);
   },
 
+  /**
+   * Edit the name, what the product does, or what the owner wants.
+   *
+   * Only the keys passed are touched, so `{ goal }` leaves the description
+   * alone. Deliberately does not rewrite the plan — editing and re-planning
+   * are two decisions, and the plan's own `stale` flag turns true by itself
+   * because both fields are hashed into it.
+   */
+  async update(
+    id: string,
+    changes: { name?: string; description?: string | null; goal?: string | null },
+  ): Promise<Product> {
+    return toProduct(
+      await request<RawProduct>(`/products/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify(changes),
+      }),
+    );
+  },
+
   async recrawl(id: string): Promise<Product> {
     return toProduct(await request<RawProduct>(`/products/${id}/recrawl`, { method: "POST" }));
   },

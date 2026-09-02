@@ -65,27 +65,38 @@ class Settings(BaseSettings):
     #:
     #: 0 means "all of them", which is what the triage was built for.
     #:
-    #: ── What this number costs, measured ─────────────────────────────────
+    #: ── 25 by decision, and what it costs ────────────────────────────────
     #:
-    #: Set to 25 by decision, to keep the token bill down. The trade is real
-    #: and worth writing down rather than rediscovering later. On a Coalent
-    #: run over 1,509 candidates, the ten results the full triage produced sat
-    #: at these embedding ranks:
+    #: Set deliberately, to cap tokens per run. Read the rest before moving
+    #: it in either direction, because the trade is sharper than it looks.
+    #:
+    #: On a Coalent run over 1,509 candidates, the ten results the full
+    #: triage produced sat at these embedding ranks:
     #:
     #:     51, 105, 182, 141, 87, 169, 80, 3, 44, 57
     #:
-    #: Only one is inside the top 25, and it is the weakest result of the ten
-    #: (score 20). The three best - 52, 47 and 46 - sit at ranks 51, 105 and
-    #: 182 and are all cut.
+    #: Only one is inside the top 25, and it is the weakest of the ten. The
+    #: three best - 52, 47 and 46 - sit at ranks 51, 105 and 182, and a pool
+    #: of 25 cuts all three.
     #:
     #: The cause is not a bad embedding model. Cosine similarity ranks by
     #: which words appear, so a shouty title carrying the product's exact
-    #: vocabulary ranks 3rd, while somebody describing the actual problem in
-    #: their own words ranks 182nd. That gap is precisely what the triage
-    #: exists to close, and reading only the top 25 puts it back.
+    #: vocabulary ranks 3rd while somebody describing the actual problem in
+    #: their own words ranks 182nd. Closing that gap is the entire purpose of
+    #: the triage, and capping the pool put it back.
     #:
-    #: Raising this is the single highest-value change available to the
-    #: quality of results. It costs about a cent a run at 1,500.
+    #: The cost being saved is smaller than the stage beside it. Every
+    #: candidate is *already* embedded before this line is reached - that is
+    #: how the ranking exists at all - and embedding a few thousand posts
+    #: costs about what reading all their titles would. Capping here does not
+    #: touch that spend; it only decides whether the money already spent on
+    #: ordering gets used by something that can read.
+    #:
+    #: Judgements are cached by title, so the second run over the same
+    #: repositories is nearly free whatever this is set to.
+    #:
+    #: If it has to be capped, a few hundred costs a fraction of a cent more
+    #: than 25 and recovers most of what the ranks above show is lost.
     triage_pool: int = Field(default=25, ge=0)
 
     #: Keep only authors with no history in the repository they posted in.

@@ -25,7 +25,13 @@ router = APIRouter(tags=["opportunities"])
 class StartIn(BaseModel):
     platform: str = "github"
 
-    #: Override what the plan chose. Empty means "use the plan".
+    #: Override what the plan chose. **Absent** means "use the plan".
+    #:
+    #: Absent and empty are different, and the difference is load-bearing:
+    #: `null` defers to the plan, `[]` says "search none of these on purpose"
+    #: - which is a real request, as in "these repositories only, no
+    #: phrases". A caller that sends `[]` for a field it simply had no value
+    #: for is asking to search nothing, and gets exactly that.
     #:
     #: The planner is a good first guess and a poor last word - it has never
     #: seen the results. Letting the user correct it before spending a run is

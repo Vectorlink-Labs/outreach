@@ -4,13 +4,22 @@ from __future__ import annotations
 
 import uuid
 
+import structlog
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Response, status
 
 from outreach.api.deps import CurrentUser, DbSession
 from outreach.db.models.product import CrawlState
 from outreach.db.repositories import products as repo
-from outreach.schemas.product import PlanOut, ProductCreate, ProductDetail, ProductOut
+from outreach.schemas.product import (
+    PlanOut,
+    ProductCreate,
+    ProductDetail,
+    ProductOut,
+    ProductUpdate,
+)
 from outreach.services import plan_service, product_service
+
+log = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/products", tags=["products"])
 
@@ -125,6 +134,51 @@ async def get_product(
     if product is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, NOT_FOUND)
     return ProductDetail.model_validate(product)
+
+
+@router.patch("/{product_id}", response_model=ProductOut)
+async def update_product(
+    product_id: uuid.UUID,
+    payload: ProductUpdate,
+    user: CurrentUser,
+    session: DbSession,
+) -> ProductOut:
+    """
+    Edit the name, what the product does, or what the owner wants.
+
+    Until this existed the two fields the planner actually reads were
+    write-once: set them wrong when creating the product and the only repair
+    was to make a new one and re-crawl the same website. That is how an
+    account ends up with three rows called "coalent".
+
+    Deliberately does **not** rewrite the plan. Editing the goal and
+    re-planning are two decisions, and doing the second automatically means
+    a typo correction silently spends a model call and replaces a plan
+    somebody may have hand-edited. The response carries the new values, the
+    plan's own `stale` flag turns true on its own - because both fields are
+    hashed into it - and the plan screen already knows how to say so.
+    """
+    product = await repo.get_owned(session, product_id, user.id)
+    if product is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, NOT_FOUND)
+
+    # `exclude_unset` so "not mentioned" and "explicitly cleared" stay
+    # different things: PATCH with {"goal": null} empties the goal, PATCH
+    # without the key leaves it alone.
+    changes = payload.model_dump(exclude_unset=True)
+
+    for field, value in changes.items():
+        if isinstance(value, str):
+            value = value.strip() or None
+        # `name` is required in the model, so an empty one is a no-op rather
+        # than a way to end up with a product that has no name.
+        if field == "name" and not value:
+            continue
+        setattr(product, field, value)
+
+    await session.flush()
+    log.info("product.updated", product_id=str(product_id), fields=sorted(changes))
+    return ProductOut.model_validate(product)
 
 
 @router.get("/{product_id}/markdown", response_class=Response)

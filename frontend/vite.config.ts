@@ -12,6 +12,29 @@ export default defineConfig({
   server: {
     port: 5173,
     open: true,
+
+    // Serve beyond localhost, so a tunnel can reach the dev server.
+    host: true,
+
+    // Vite 6 rejects any request whose Host header it does not recognise,
+    // which is every request arriving through a tunnel: the browser sends
+    // the tunnel's hostname, not localhost, and the reply is "Blocked
+    // request. This host is not allowed." rather than anything hinting that
+    // hosts are configurable.
+    //
+    // Named domains rather than `true`. `true` accepts any Host at all,
+    // which re-opens the DNS-rebinding hole this check exists to close.
+    // ngrok hands out `.ngrok-free.dev` now, not the `.ngrok-free.app` the
+    // docs still show, so both are here. A leading dot matches subdomains,
+    // which is what makes this survive the free tier handing out a fresh
+    // name on every restart.
+    allowedHosts: [
+      ".ngrok-free.dev",
+      ".ngrok-free.app",
+      ".ngrok.app",
+      ".ngrok.io",
+    ],
+
     proxy: {
       // So the browser talks to the FastAPI service without CORS in dev.
       //
