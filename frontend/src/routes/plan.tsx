@@ -1,28 +1,26 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
-import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
-import Chip from "@mui/material/Chip";
-import Divider from "@mui/material/Divider";
 import LinearProgress from "@mui/material/LinearProgress";
-import Paper from "@mui/material/Paper";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
+import { alpha } from "@mui/material/styles";
 
 import AutoAwesomeIcon from "@mui/icons-material/AutoAwesome";
+import CampaignIcon from "@mui/icons-material/CampaignOutlined";
 import EventNoteIcon from "@mui/icons-material/EventNoteOutlined";
 import LightbulbIcon from "@mui/icons-material/LightbulbOutlined";
 import PeopleIcon from "@mui/icons-material/PeopleAltOutlined";
-import RefreshIcon from "@mui/icons-material/Refresh";
 import RouteIcon from "@mui/icons-material/RouteOutlined";
-import CampaignIcon from "@mui/icons-material/CampaignOutlined";
 
 import { ErrorBlock, Loading } from "@/components/StateBlocks";
 import LatestResults from "@/features/plan/LatestResults";
+import PlanHero from "@/features/plan/PlanHero";
 import PlatformCard from "@/features/plan/PlatformCard";
 import ProductBrief from "@/features/plan/ProductBrief";
+import { IconTile, Label, SectionHead, Surface, hairline } from "@/components/ui";
 import {
   productApi,
   type PlanPlatform,
@@ -35,7 +33,7 @@ const POLL_MS = 3000;
 const GIVE_UP_AFTER = 30;
 
 /** The page never runs wider than this, so no line of prose gets unreadable. */
-const PAGE = 1180;
+const PAGE = 1240;
 
 export default function PlanRoute() {
   const { productId = "" } = useParams();
@@ -131,13 +129,7 @@ export default function PlanRoute() {
     navigate(`/opportunities?${params.toString()}`);
   };
 
-  if (loading) {
-    return (
-      <Shell>
-        <Loading label="Opening the plan" />
-      </Shell>
-    );
-  }
+  if (loading) return <Loading label="Opening the plan" />;
 
   const plan = result?.plan;
   // What the AI decided this product's world is, which is a far better
@@ -150,105 +142,63 @@ export default function PlanRoute() {
 
   return (
     <Shell>
-      {/* ------------------------------------------------------- header */}
-      <Stack
-        direction={{ xs: "column", sm: "row" }}
-        alignItems={{ xs: "flex-start", sm: "flex-end" }}
-        justifyContent="space-between"
-        gap={2}
-      >
-        <Box sx={{ minWidth: 0 }}>
-          <Typography
-            variant="overline"
-            sx={{ color: "text.secondary", letterSpacing: ".16em", fontSize: 10.5 }}
-          >
-            Marketing plan
-          </Typography>
-          <Typography
-            variant="h4"
-            sx={{ fontSize: { xs: 26, md: 32 }, fontWeight: 680, letterSpacing: "-.022em" }}
-          >
-            {product?.name ?? "Product"}
-          </Typography>
-
-          {product && (
-            <Stack
-              direction="row"
-              alignItems="center"
-              flexWrap="wrap"
-              gap={1}
-              sx={{ mt: 1, color: "text.secondary" }}
-              divider={<Dot />}
-            >
-              <Meta>{product.domain}</Meta>
-              <Meta>
-                {product.pageCount} {product.pageCount === 1 ? "page" : "pages"} read
-              </Meta>
-              {plan && (
-                <Meta>
-                  {plan.platforms.length} {plan.platforms.length === 1 ? "channel" : "channels"}
-                </Meta>
-              )}
-              {result?.madeAt && <Meta>written {shortDate(result.madeAt)}</Meta>}
-            </Stack>
-          )}
-        </Box>
-
-        {plan && (
-          <Button
-            variant="outlined"
-            startIcon={<RefreshIcon />}
-            onClick={() => write(true)}
-            disabled={writing}
-            sx={{ flexShrink: 0 }}
-          >
-            Rewrite
-          </Button>
-        )}
-      </Stack>
+      <PlanHero
+        name={product?.name ?? "Product"}
+        domain={product?.domain}
+        rewriting={writing}
+        onRewrite={plan ? () => write(true) : undefined}
+        stats={
+          product
+            ? [
+                { value: product.pageCount, label: "Pages read" },
+                ...(plan ? [{ value: plan.platforms.length, label: "Channels" }] : []),
+                ...(ready.length ? [{ value: ready.length, label: "Searchable" }] : []),
+                ...(result?.madeAt
+                  ? [{ value: shortDate(result.madeAt), label: "Written" }]
+                  : []),
+              ]
+            : []
+        }
+      />
 
       {error && <ErrorBlock message={error} onRetry={() => window.location.reload()} />}
 
-      {result?.stale && !writing && (
-        <Alert
-          severity="info"
-          variant="outlined"
-          action={
-            <Button size="small" onClick={() => write(true)}>
-              Rewrite
-            </Button>
-          }
-        >
-          This product has changed since the plan was written.
-        </Alert>
-      )}
-
       {/* ------------------------------------------------------- writing */}
       {writing && (
-        <Paper variant="outlined" sx={{ overflow: "hidden" }}>
+        <Surface sx={{ overflow: "hidden" }}>
           <LinearProgress />
-          <Box sx={{ p: 3 }}>
-            <Stack direction="row" alignItems="center" gap={1.25} sx={{ mb: 1 }}>
-              <AutoAwesomeIcon color="primary" sx={{ fontSize: 20 }} />
-              <Typography sx={{ fontWeight: 650, fontSize: 17 }}>Writing the plan</Typography>
-            </Stack>
-            <Typography variant="body2" color="text.secondary" sx={{ maxWidth: "62ch" }}>
-              Reading what your website says, working out who to reach and where. This
-              takes about half a minute.
-            </Typography>
-          </Box>
-        </Paper>
+          <Stack direction="row" gap={2} sx={{ p: { xs: 2.5, md: 3.5 } }}>
+            <IconTile tone="primary" size={44}>
+              <AutoAwesomeIcon />
+            </IconTile>
+            <Box>
+              <Typography sx={{ fontWeight: 690, fontSize: 18, letterSpacing: "-.015em" }}>
+                Writing the plan
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ maxWidth: "62ch", mt: 0.5 }}>
+                Reading what your website says, working out who to reach and where. This
+                takes about half a minute.
+              </Typography>
+            </Box>
+          </Stack>
+        </Surface>
       )}
 
       {/* --------------------------------------------------------- empty */}
       {!plan && !writing && (
-        <Paper variant="outlined" sx={{ px: 3, py: 7, textAlign: "center" }}>
-          <AutoAwesomeIcon sx={{ fontSize: 28, color: "text.disabled", mb: 1.5 }} />
-          <Typography sx={{ fontWeight: 650, fontSize: 18, mb: 1 }}>No plan yet</Typography>
+        <Surface sx={{ px: 3, py: { xs: 6, md: 9 }, textAlign: "center" }}>
+          <Box sx={{ display: "inline-flex", mb: 2 }}>
+            <IconTile tone="primary" size={52}>
+              <AutoAwesomeIcon />
+            </IconTile>
+          </Box>
+          <Typography sx={{ fontWeight: 700, fontSize: 22, letterSpacing: "-.02em", mb: 1 }}>
+            No plan yet
+          </Typography>
           <Typography
             variant="body2"
             color="text.secondary"
-            sx={{ mb: 3, maxWidth: "48ch", mx: "auto" }}
+            sx={{ mb: 3.5, maxWidth: "50ch", mx: "auto", lineHeight: 1.7 }}
           >
             {product?.state === "ready"
               ? "The website has been read. Write the marketing plan from it."
@@ -260,63 +210,93 @@ export default function PlanRoute() {
             startIcon={<AutoAwesomeIcon />}
             onClick={() => write(false)}
             disabled={product?.state === "crawling" || product?.state === "queued"}
+            sx={{ borderRadius: 2, px: 3.5, py: 1.3 }}
           >
             Write the plan
           </Button>
-        </Paper>
+        </Surface>
       )}
 
       {/* ---------------------------------------------------------- plan */}
       {plan && (
         <>
-          {/* Three columns, not three stacked paragraphs. At full width a
-              paragraph here ran to about 130 characters a line, which is
-              roughly twice a readable measure. */}
-          <Paper
-            variant="outlined"
-            sx={{
-              display: "grid",
-              gridTemplateColumns: { xs: "1fr", md: "repeat(3, minmax(0, 1fr))" },
-              "& > * + *": {
-                borderTop: { xs: 1, md: 0 },
-                borderLeft: { xs: 0, md: 1 },
-                borderColor: "divider",
-              },
-            }}
-          >
-            <Pillar icon={<RouteIcon />} title="Strategy" body={plan.strategy} />
-            <Pillar icon={<PeopleIcon />} title="Who to reach" body={plan.audience} />
-            <Pillar icon={<CampaignIcon />} title="How to describe it" body={plan.positioning} />
-          </Paper>
-
-          {/* Editable, and above the plan rather than beside it: these two
-              fields are what the plan is generated *from*, so reading them
-              after the plan puts the cause after the effect. */}
-          {product && (
-            <ProductBrief
-              product={product}
-              stale={result?.stale ?? false}
-              onSaved={load}
-              onRewrite={() => write(true)}
-            />
-          )}
-
-          {/* The plan and what it found, on one screen. Searching again is
-              deliberately separate from rewriting the plan: one asks "has
-              anything new been posted", the other "are we looking for the
-              right thing", and they are rarely the same question. */}
+          {/* The payoff first.
+              The plan explains what we are looking for; this is what was
+              actually found. Reading the explanation before the result is
+              the wrong way round on every visit after the first. */}
           {ready.length > 0 && (
-            <LatestResults
-              productId={productId}
-              onSearch={() =>
-                findOpportunities(ready[0], ready[0].searchTerms, ready[0].targetPlaces)
-              }
-            />
+            <Box component="section">
+              <SectionHead
+                title="Latest search"
+                tone="live"
+                hint={
+                  ready.length > 1
+                    ? "What the plan below actually found. Each source keeps its own results."
+                    : `What the plan below actually found on ${ready[0].name}.`
+                }
+              />
+              <LatestResults
+                productId={productId}
+                platforms={ready.map((p) => p.key)}
+                onSearch={(key) => {
+                  // Search the platform being looked at, with that card's
+                  // own terms - not whichever one happens to be first.
+                  const card = ready.find((p) => p.key === key) ?? ready[0];
+                  findOpportunities(card, card.searchTerms, card.targetPlaces);
+                }}
+              />
+            </Box>
           )}
 
-          {/* One card, full width, laid out in two columns internally. The
-              old three-column grid left two thirds of the row empty next to
-              the single card that actually does anything. */}
+          {/* The brief and the strategy it produced, side by side.
+              Cause on the left, effect on the right — and because the brief
+              is editable, the thing you change sits next to the thing that
+              changes. */}
+          <Box component="section">
+            <SectionHead
+              title="The thinking"
+              hint="Your brief is the input. Everything to the right of it was written from that."
+            />
+            <Box
+              sx={{
+                display: "grid",
+                gap: 2.5,
+                alignItems: "stretch",
+                gridTemplateColumns: { xs: "1fr", lg: "minmax(0, 5fr) minmax(0, 7fr)" },
+              }}
+            >
+              {product && (
+                <ProductBrief
+                  product={product}
+                  stale={result?.stale ?? false}
+                  onSaved={load}
+                  onRewrite={() => write(true)}
+                />
+              )}
+
+              <Surface sx={{ display: "flex", flexDirection: "column", overflow: "hidden" }}>
+                <Pillar
+                  icon={<RouteIcon />}
+                  title="Strategy"
+                  body={plan.strategy}
+                />
+                <Pillar
+                  icon={<PeopleIcon />}
+                  title="Who to reach"
+                  body={plan.audience}
+                  divided
+                />
+                <Pillar
+                  icon={<CampaignIcon />}
+                  title="How to describe it"
+                  body={plan.positioning}
+                  divided
+                />
+              </Surface>
+            </Box>
+          </Box>
+
+          {/* ------------------------------------------------- channels */}
           <Group
             title="Search these now"
             hint="We can find real posts here. Press the button to see who is asking."
@@ -333,7 +313,7 @@ export default function PlanRoute() {
             hint="We cannot search these. The plan says what to do there and in what voice."
             count={byHand.length}
             platforms={byHand}
-            columns={2}
+            columns={3}
           />
 
           <Group
@@ -341,27 +321,34 @@ export default function PlanRoute() {
             hint="We will be able to search these once the connector is built."
             count={soon.length}
             platforms={soon}
-            columns={2}
+            columns={3}
           />
 
-          <Box
-            sx={{
-              display: "grid",
-              gap: 2.5,
-              gridTemplateColumns: { xs: "1fr", md: "repeat(2, minmax(0, 1fr))" },
-            }}
-          >
-            <ListCard
-              icon={<LightbulbIcon />}
-              title="What to write about"
-              items={plan.contentIdeas}
+          {/* ---------------------------------------------------- doing */}
+          <Box component="section">
+            <SectionHead
+              title="What to do next"
+              hint="Written for this product, not general advice."
             />
-            <ListCard
-              icon={<EventNoteIcon />}
-              title="First week"
-              items={plan.firstWeek}
-              numbered
-            />
+            <Box
+              sx={{
+                display: "grid",
+                gap: 2.5,
+                gridTemplateColumns: { xs: "1fr", md: "repeat(2, minmax(0, 1fr))" },
+              }}
+            >
+              <ListCard
+                icon={<LightbulbIcon />}
+                title="What to write about"
+                items={plan.contentIdeas}
+              />
+              <ListCard
+                icon={<EventNoteIcon />}
+                title="First week"
+                items={plan.firstWeek}
+                numbered
+              />
+            </Box>
           </Box>
         </>
       )}
@@ -380,25 +367,9 @@ export default function PlanRoute() {
  */
 function Shell({ children }: { children: ReactNode }) {
   return (
-    <Box sx={{ maxWidth: PAGE, mx: "auto", px: { xs: 2, sm: 3 }, py: { xs: 3, md: 5 } }}>
-      <Stack gap={{ xs: 2.5, md: 3.5 }}>{children}</Stack>
+    <Box sx={{ maxWidth: PAGE, mx: "auto", px: { xs: 2, sm: 3 }, py: { xs: 3, md: 4.5 } }}>
+      <Stack gap={{ xs: 3.5, md: 5 }}>{children}</Stack>
     </Box>
-  );
-}
-
-function Meta({ children }: { children: ReactNode }) {
-  return (
-    <Typography variant="body2" sx={{ color: "text.secondary" }}>
-      {children}
-    </Typography>
-  );
-}
-
-function Dot() {
-  return (
-    <Box
-      sx={{ width: 3, height: 3, borderRadius: "50%", bgcolor: "text.disabled", flexShrink: 0 }}
-    />
   );
 }
 
@@ -409,29 +380,39 @@ function shortDate(iso: string): string {
   return date.toLocaleDateString(undefined, { day: "numeric", month: "short" });
 }
 
+/**
+ * One third of the strategy.
+ *
+ * Stacked rather than in three columns. Side by side these ran to about
+ * thirty characters a line at desktop width — a shape that is harder to
+ * read than the long line it was meant to fix.
+ */
 function Pillar({
   icon,
   title,
   body,
+  divided = false,
 }: {
   icon: ReactNode;
   title: string;
   body: string;
+  divided?: boolean;
 }) {
   return (
-    <Box sx={{ p: 2.5 }}>
-      <Stack direction="row" alignItems="center" gap={1} sx={{ mb: 1.25 }}>
-        <Box sx={{ color: "text.secondary", display: "flex", "& svg": { fontSize: 17 } }}>
+    <Box
+      sx={{
+        p: { xs: 2.5, md: 3 },
+        flex: 1,
+        ...(divided && { borderTop: 1, borderColor: (t) => hairline(t) }),
+      }}
+    >
+      <Stack direction="row" alignItems="center" gap={1.25} sx={{ mb: 1.25 }}>
+        <Box sx={{ color: "primary.main", display: "flex", "& svg": { fontSize: 17 } }}>
           {icon}
         </Box>
-        <Typography
-          variant="overline"
-          sx={{ fontSize: 10.5, letterSpacing: ".12em", color: "text.secondary", lineHeight: 1.6 }}
-        >
-          {title}
-        </Typography>
+        <Label>{title}</Label>
       </Stack>
-      <Typography variant="body2" sx={{ lineHeight: 1.65 }}>
+      <Typography variant="body2" sx={{ lineHeight: 1.75 }}>
         {body || <Box component="span" sx={{ color: "text.disabled" }}>—</Box>}
       </Typography>
     </Box>
@@ -467,27 +448,17 @@ function Group({
 
   return (
     <Box component="section">
-      <Stack direction="row" alignItems="center" gap={1.25} sx={{ mb: 0.5 }}>
-        <Typography sx={{ fontWeight: 680, fontSize: 19, letterSpacing: "-.015em" }}>
-          {title}
-        </Typography>
-        <Chip
-          size="small"
-          label={count}
-          color={tone === "live" ? "success" : "default"}
-          variant="outlined"
-          sx={{ height: 20, fontSize: 11, minWidth: 26 }}
-        />
-      </Stack>
-      <Typography variant="body2" color="text.secondary" sx={{ mb: 2, maxWidth: "72ch" }}>
-        {hint}
-      </Typography>
-
+      <SectionHead title={title} hint={hint} count={count} tone={tone} />
       <Box
         sx={{
           display: "grid",
           gap: 2.5,
-          gridTemplateColumns: { xs: "1fr", md: `repeat(${cols}, minmax(0, 1fr))` },
+          alignItems: "stretch",
+          gridTemplateColumns: {
+            xs: "1fr",
+            sm: cols > 1 ? "repeat(2, minmax(0, 1fr))" : "1fr",
+            md: `repeat(${cols}, minmax(0, 1fr))`,
+          },
         }}
       >
         {platforms.map((p) => (
@@ -518,34 +489,47 @@ function ListCard({
   if (items.length === 0) return null;
 
   return (
-    <Paper variant="outlined" sx={{ height: "100%", display: "flex", flexDirection: "column" }}>
-      <Stack direction="row" alignItems="center" gap={1.25} sx={{ px: 2.5, py: 2 }}>
-        <Box sx={{ color: "text.secondary", display: "flex", "& svg": { fontSize: 18 } }}>
+    <Surface sx={{ height: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+      <Stack
+        direction="row"
+        alignItems="center"
+        gap={1.5}
+        sx={{
+          px: { xs: 2.5, md: 3 },
+          py: 2.25,
+          borderBottom: 1,
+          borderColor: (t) => hairline(t),
+        }}
+      >
+        <IconTile tone="primary" size={34}>
           {icon}
-        </Box>
-        <Typography sx={{ fontWeight: 650, fontSize: 16 }}>{title}</Typography>
+        </IconTile>
+        <Typography sx={{ fontWeight: 680, fontSize: 16.5, letterSpacing: "-.01em" }}>
+          {title}
+        </Typography>
       </Stack>
-      <Divider />
 
-      <Stack sx={{ p: 2.5 }} gap={1.5}>
+      <Stack sx={{ p: { xs: 2.5, md: 3 } }} gap={2}>
         {items.map((item, i) => (
           // Index in the key because the model does occasionally repeat a
           // line, and two identical keys drop one of them silently.
-          <Stack key={`${i}-${item}`} direction="row" gap={1.5} alignItems="flex-start">
+          <Stack key={`${i}-${item}`} direction="row" gap={1.75} alignItems="flex-start">
             {numbered ? (
               <Box
                 sx={{
-                  width: 20,
-                  height: 20,
-                  mt: 0.15,
+                  width: 23,
+                  height: 23,
+                  mt: 0.1,
                   flexShrink: 0,
                   borderRadius: "50%",
                   display: "grid",
                   placeItems: "center",
-                  fontSize: 11,
+                  fontSize: 11.5,
                   fontWeight: 700,
-                  bgcolor: "primary.main",
-                  color: "primary.contrastText",
+                  border: 1,
+                  borderColor: (t) => alpha(t.palette.primary.main, 0.35),
+                  bgcolor: (t) => alpha(t.palette.primary.main, 0.1),
+                  color: "primary.main",
                 }}
               >
                 {i + 1}
@@ -555,19 +539,20 @@ function ListCard({
                 sx={{
                   width: 5,
                   height: 5,
-                  mt: 0.9,
+                  mt: 1,
                   flexShrink: 0,
                   borderRadius: "50%",
-                  bgcolor: "text.disabled",
+                  bgcolor: "primary.main",
+                  opacity: 0.55,
                 }}
               />
             )}
-            <Typography variant="body2" sx={{ lineHeight: 1.6 }}>
+            <Typography variant="body2" sx={{ lineHeight: 1.7 }}>
               {item}
             </Typography>
           </Stack>
         ))}
       </Stack>
-    </Paper>
+    </Surface>
   );
 }

@@ -17,8 +17,10 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import sys
 import uuid
 from datetime import UTC, datetime
+from pathlib import Path
 
 import httpx
 import structlog
@@ -26,8 +28,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from outreach import classify, dedupe, planner, rank, score
 from outreach.config import settings
-from outreach.connectors import github, github_discussions
+from outreach.connectors import github, github_discussions, hackernews
 from outreach.db.models.product import Product
+from outreach.db.repositories import leads as lead_repo
 from outreach.db.repositories import products as repo
 from outreach.db.repositories import search_runs as run_repo
 from outreach.db.session import session_scope
@@ -40,8 +43,17 @@ log = structlog.get_logger(__name__)
 
 RUNS: dict[str, dict] = {}
 
+#: So a broken eval pool complains once rather than on every run.
+_EVAL_WARNED = False
+
+#: What the fetch stage is called, per platform. The others never vary.
+FETCH_LABEL = {
+    "github": "Searching GitHub issues and discussions",
+    "hackernews": "Searching Hacker News stories and comments",
+}
+
 STAGES = [
-    ("fetch", "Searching GitHub issues and discussions"),
+    ("fetch", "Searching"),
     ("filter", "Removing bots and project insiders"),
     ("rank", "Reading for meaning"),
     ("judge", "Judging who actually needs this"),
@@ -155,8 +167,18 @@ def start(
         "terms": terms,
         "repos": repos,
         "state": "queued",
-        "stages": [{"id": s, "label": label, "state": "waiting", "detail": None}
-                   for s, label in STAGES],
+        "stages": [
+            {
+                "id": s,
+                # The fetch stage names the source it is reading. Watching a
+                # progress bar that says "Searching" tells you nothing about
+                # whether the right thing is happening.
+                "label": FETCH_LABEL.get(platform, label) if s == "fetch" else label,
+                "state": "waiting",
+                "detail": None,
+            }
+            for s, label in STAGES
+        ],
         "percent": 0,
         "notes": [],
         "results": [],
@@ -184,9 +206,16 @@ async def load(session: AsyncSession, run_id: str) -> dict:
     return run_repo.to_dict(row)
 
 
-async def latest(session: AsyncSession, product_id: uuid.UUID) -> dict | None:
-    """The most recent search for a product, or None if there has never been one."""
-    row = await run_repo.latest_for_product(session, product_id)
+async def latest(
+    session: AsyncSession, product_id: uuid.UUID, platform: str | None = None
+) -> dict | None:
+    """
+    The most recent search for a product, or None if there has never been one.
+
+    `platform` narrows it to one source, so a screen can show GitHub and
+    Hacker News side by side rather than only whichever ran most recently.
+    """
+    row = await run_repo.latest_for_product(session, product_id, platform)
     if row is None:
         return None
 
@@ -208,6 +237,80 @@ async def _persist(run: dict) -> None:
             await run_repo.save(session, run)
     except Exception:
         log.exception("opportunity.persist_failed", run_id=run.get("id"))
+
+
+async def _record_leads(run: dict) -> None:
+    """
+    Fold this run's results into the product's lead list.
+
+    Runs before `_persist` rather than after, so the "N new" note it adds is
+    part of the copy that gets stored: a note written afterwards would show
+    on screen once and be missing from the run for ever after.
+
+    Never fails the run. A search that found ten good leads and then could
+    not file them should still show the ten leads.
+    """
+    if run.get("state") != "succeeded":
+        return
+
+    results = run.get("results") or []
+    if not results:
+        return
+
+    try:
+        async with session_scope() as session:
+            fresh = await lead_repo.record(
+                session, uuid.UUID(run["product_id"]), results
+            )
+    except Exception:
+        log.exception("opportunity.leads_failed", run_id=run.get("id"))
+        return
+
+    # Said either way. "0 new" is a real answer to "has anything happened
+    # since last week", and leaving it out makes the run look like it
+    # forgot to check.
+    run["notes"].append(
+        f"{fresh} of these {len(results)} have never been seen before"
+        if fresh
+        else f"none of these {len(results)} are new since your last search"
+    )
+
+
+def _capture_for_eval(conversations: list[Conversation], product: str) -> None:
+    """
+    Add this run's judged results to the labelling pool.
+
+    The pool is the only ground truth this system has, and it was being fed
+    by exactly one caller: the manual `/sources/github/search` endpoint,
+    which nothing in the UI ever calls. So every real search went
+    uncaptured and the pool sat at 25 candidates collected by hand in
+    August, while every prompt change since was argued rather than
+    measured.
+
+    Wrapped, because collecting evidence must never cost a result.
+
+    The path is resolved rather than imported by name. `eval` lives beside
+    `src` in the backend root, so a bare `from eval import store` only works
+    when the process happens to have been started from that directory - and
+    when it does not, this fails silently and the pool stops growing with
+    nothing to say why. Which is the failure being fixed here, so it is not
+    one to reproduce.
+    """
+    try:
+        root = str(Path(__file__).resolve().parents[3])
+        if root not in sys.path:
+            sys.path.insert(0, root)
+
+        from eval import store
+
+        store.capture(conversations, product)
+    except Exception:
+        # Once per process, at a level somebody will actually see. A pool
+        # that quietly never grows is worse than a noisy failure.
+        global _EVAL_WARNED
+        if not _EVAL_WARNED:
+            _EVAL_WARNED = True
+            log.warning("opportunity.eval_capture_failed", exc_info=True)
 
 
 async def execute(run_id: str) -> None:
@@ -299,41 +402,17 @@ async def execute(run_id: str) -> None:
 
         _mark(run, "fetch", "running")
 
-        # Concurrently, because they queue on different rate limits - REST
-        # search on 30 a minute, GraphQL on 5,000 points an hour. Run in
-        # sequence the discussion search would add its whole duration to the
-        # run for no reason; run together it is effectively free.
-        issues, discussions = await asyncio.gather(
-            github.search(
-                terms,
-                repos=places,
-                days=90,
-                max_requests=budget,
-                outsiders_only=settings.outsiders_only,
-                min_repo_stars=settings.min_repo_stars,
-            ),
-            _discussions(terms, places, run),
-        )
+        raw, detail = await _fetch(run["platform"], terms, places, budget, run)
 
-        run["notes"].extend(issues.notes)
-        run["notes"].extend(discussions.notes)
-
-        # Ids never collide between the two - an issue node id and a
-        # discussion node id come from the same global space - but the same
-        # *content* does turn up twice, and only a content check finds it.
-        conversations, duplicates = dedupe.collapse(
-            issues.conversations + discussions.conversations
-        )
+        # The same *content* turns up twice often enough to be worth a pass:
+        # somebody files an issue and opens a discussion for it, or posts the
+        # same question in two Hacker News threads. Ids never collide, so
+        # only a content check finds those.
+        conversations, duplicates = dedupe.collapse(raw)
         if duplicates:
             run["notes"].append(f"collapsed {duplicates} repeats of the same post")
 
-        _mark(
-            run,
-            "fetch",
-            "done",
-            f"{len(issues.conversations)} issues + "
-            f"{len(discussions.conversations)} discussions",
-        )
+        _mark(run, "fetch", "done", detail)
         _mark(run, "filter", "done", "bots and insiders removed")
 
         if not conversations:
@@ -392,10 +471,8 @@ async def execute(run_id: str) -> None:
         # whether a small result set came from a small search or a small
         # market.
         run["notes"].append(
-            f"funnel: {len(issues.conversations)} issues + "
-            f"{len(discussions.conversations)} discussions "
-            f"-> {fetched} after duplicates -> {ranked} through the gate "
-            f"-> {len(conversations)} judged"
+            f"funnel: {detail} -> {fetched} after duplicates "
+            f"-> {ranked} through the gate -> {len(conversations)} judged"
         )
 
         _mark(run, "judge", "running")
@@ -408,6 +485,8 @@ async def execute(run_id: str) -> None:
         conversations = score.apply(conversations)
         run["results"] = [_to_dict(c, i + 1) for i, c in enumerate(conversations)]
         _mark(run, "score", "done", f"{len(conversations)} scored")
+
+        _capture_for_eval(conversations, target)
 
         coverage = _coverage(candidates, conversations, groups)
         if coverage:
@@ -427,10 +506,69 @@ async def execute(run_id: str) -> None:
         # In a finally, not after `_finish`, because the happy path has
         # several early returns in it - an empty fetch, an empty gate - and
         # those are exactly the runs worth remembering having done.
+        await _record_leads(run)
         await _persist(run)
 
 
 # ---------------------------------------------------------------- internals
+
+
+async def _fetch(
+    platform: str,
+    terms: list[str],
+    places: list[str],
+    budget: int,
+    run: dict,
+) -> tuple[list[Conversation], str]:
+    """
+    Everything one platform returns, plus a line describing what came back.
+
+    The one place that knows a platform is more than a connector. GitHub is
+    two searches that have to run together; Hacker News is one search over
+    two different kinds of thing. Downstream sees a flat list either way,
+    which is what lets ranking, triage and scoring stay source-agnostic.
+    """
+    if platform == "hackernews":
+        found = await hackernews.search(
+            terms,
+            days=90,
+            # Algolia costs nothing and answers fast, so the budget is about
+            # politeness rather than quota. There are no repository sweeps
+            # here either - every result comes from a phrase - so the same
+            # number buys proportionally more.
+            max_requests=max(MIN_REQUESTS, budget),
+            min_story_points=settings.min_hn_points,
+        )
+        run["notes"].extend(found.notes)
+
+        stories = sum(1 for c in found.conversations if c.kind == "story")
+        comments = len(found.conversations) - stories
+        return found.conversations, f"{stories} stories + {comments} comments"
+
+    # GitHub, concurrently, because the two queue on different rate limits -
+    # REST search on 30 a minute, GraphQL on 5,000 points an hour. Run in
+    # sequence the discussion search would add its whole duration to the run
+    # for no reason; run together it is effectively free.
+    issues, discussions = await asyncio.gather(
+        github.search(
+            terms,
+            repos=places,
+            days=90,
+            max_requests=budget,
+            outsiders_only=settings.outsiders_only,
+            min_repo_stars=settings.min_repo_stars,
+        ),
+        _discussions(terms, places, run),
+    )
+
+    run["notes"].extend(issues.notes)
+    run["notes"].extend(discussions.notes)
+
+    return (
+        issues.conversations + discussions.conversations,
+        f"{len(issues.conversations)} issues + "
+        f"{len(discussions.conversations)} discussions",
+    )
 
 
 async def _discussions(

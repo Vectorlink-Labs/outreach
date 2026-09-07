@@ -51,10 +51,44 @@ Name real places. `r/LocalLLaMA`, not "relevant subreddits". A named Discord
 or Slack community, not "developer communities".
 
 Two of them we can search automatically, so their `term_groups` get used
-directly by our crawler:
+directly by our crawler. **Both need their own `term_groups`** — leaving one
+empty means that source is never searched at all:
 
 - `github` — issues and discussions in public repositories
-- `hackernews` — posts and comments
+- `hackernews` — stories *and comments*
+
+### The two searchable platforms are not the same shape
+
+**GitHub has rooms. Hacker News does not.** On GitHub the strongest move is
+naming repositories, because every recent issue in one becomes a candidate
+without anyone guessing a keyword. Hacker News has no equivalent — there is
+nothing to sweep, only a firehose — so **on Hacker News the terms are the
+entire search**, and `target_places` must be left empty there.
+
+That changes what good terms look like for each:
+
+| | GitHub | Hacker News |
+|---|---|---|
+| `target_places` | 15–20 repositories | **empty — there is nothing to name** |
+| `term_groups` | 8–12 terms | **8–12 terms, and they carry everything** |
+| what gets read | issue titles and bodies | story titles and **comment text** |
+
+Comments are where Hacker News keeps its value. A story is usually a link
+somebody posted; the person describing the problem in their own words is four
+replies down — which is why comment text is searched, not just titles.
+
+**Write Hacker News terms the same way as GitHub ones: terms of art and
+intersections.** Not looser, vaguer prose. A real plan came back with
+`response time + AI`, `data updates + AI` and `stale information + AI`, and
+every one of them matched hundreds of posts about nothing in particular,
+because `AI` appears in most of Hacker News and carries no meaning as half of
+an intersection. The terms that worked on the same product were
+`prompt caching + RAG` and `semantic cache + cost` — two real technical
+concepts, both of which had to appear.
+
+Never use a word as broad as `AI`, `LLM`, `data` or `model` as one side of an
+intersection. Both sides must be things a person would recognise as a
+specific concept.
 
 **`target_places` matters more than the terms, and it is not close.** Measured
 on a real run: repository sweeps produced 845 of 1,509 candidates while every
@@ -214,6 +248,31 @@ alternatives.
         "<problem 4 in your own words>": ["<term>", "<term>"]
       }},
       "target_places": ["<owner/name>", "<owner/name>", "..."]
+    }},
+    {{
+      "key": "hackernews",
+      "name": "Hacker News",
+      "why": "why this platform suits THIS product",
+      "what_to_do": "the actual activity, in one or two sentences",
+      "tone": "how to write there",
+      "term_groups": {{
+        "<same problems, phrased the way somebody talks in a thread>": [
+          "<term>", "<term>", "<term>"
+        ],
+        "<problem 2>": ["<term>", "<term>"],
+        "<problem 3>": ["<term>", "<term>"],
+        "<problem 4>": ["<term>", "<term>"]
+      }},
+      "target_places": []
+    }},
+    {{
+      "key": "<a place we cannot search — a subreddit, forum, community>",
+      "name": "<its real name>",
+      "why": "...",
+      "what_to_do": "...",
+      "tone": "...",
+      "term_groups": {{}},
+      "target_places": []
     }}
   ],
   "content_ideas": ["3 to 5 specific things to write, each a real title"],

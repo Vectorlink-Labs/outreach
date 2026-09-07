@@ -30,7 +30,7 @@ async def get(session: AsyncSession, run_id: str) -> SearchRun | None:
 
 
 async def latest_for_product(
-    session: AsyncSession, product_id: uuid.UUID
+    session: AsyncSession, product_id: uuid.UUID, platform: str | None = None
 ) -> SearchRun | None:
     """
     The most recent search for this product, whatever happened to it.
@@ -38,13 +38,15 @@ async def latest_for_product(
     Not "the most recent successful one". A search that failed is still the
     last thing that happened, and hiding it would leave somebody looking at
     a week-old result wondering why yesterday's search never appeared.
+
+    `platform` narrows it to one source. Without that, a product searched on
+    both GitHub and Hacker News can only ever show whichever ran last, and
+    running one hides the other's results even though both are still there.
     """
-    stmt = (
-        select(SearchRun)
-        .where(SearchRun.product_id == product_id)
-        .order_by(SearchRun.started_at.desc())
-        .limit(1)
-    )
+    stmt = select(SearchRun).where(SearchRun.product_id == product_id)
+    if platform:
+        stmt = stmt.where(SearchRun.platform == platform)
+    stmt = stmt.order_by(SearchRun.started_at.desc()).limit(1)
     return (await session.execute(stmt)).scalar_one_or_none()
 
 

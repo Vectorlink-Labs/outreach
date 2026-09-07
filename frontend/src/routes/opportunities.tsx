@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link as RouterLink, useSearchParams } from "react-router-dom";
 
 import Accordion from "@mui/material/Accordion";
@@ -23,8 +23,14 @@ import OpenInNewIcon from "@mui/icons-material/OpenInNew";
 import RadioButtonUncheckedIcon from "@mui/icons-material/RadioButtonUnchecked";
 import SearchIcon from "@mui/icons-material/Search";
 
-import { BAND_COLOR, WEAK_BELOW } from "@/features/opportunities/band";
-import { productApi, type Opportunity, type OpportunityRun } from "@/lib/productApi";
+import { BAND_COLOR, WEAK_BELOW, platformName } from "@/features/opportunities/band";
+import LeadActions from "@/features/opportunities/LeadActions";
+import {
+  productApi,
+  type Lead,
+  type Opportunity,
+  type OpportunityRun,
+} from "@/lib/productApi";
 import { MONO } from "@/styles/theme";
 
 const POLL_MS = 2000;
@@ -74,6 +80,12 @@ export default function OpportunitiesRoute() {
   const existingRunId = params.get("run") ?? "";
 
   const [run, setRun] = useState<OpportunityRun | null>(null);
+  /* The lead row for each result, keyed by GitHub node id.
+   *
+   * A run holds what a search found; a lead holds what you did about
+   * it. They are joined on `source_id`, which the results already carry
+   * as `id` - the key existed long before the table did. */
+  const [leads, setLeads] = useState<Record<string, Lead>>({});
   const [error, setError] = useState<string | null>(null);
 
   /* What this screen has already acted on.
@@ -173,6 +185,34 @@ export default function OpportunitiesRoute() {
   // unmount rather than between the development double-pass.
   useEffect(() => () => window.clearInterval(pollRef.current), []);
 
+  /* Leads, once the run has told us which product it belongs to.
+   *
+   * Deliberately not part of the polling loop above. Lead state changes
+   * when a person presses a button, not while a search runs, so re-reading
+   * it every two seconds would undo an optimistic update mid-click. */
+  const forProduct = run?.product_id;
+  useEffect(() => {
+    if (!forProduct) return;
+    let alive = true;
+    (async () => {
+      try {
+        const found = await productApi.leads(forProduct);
+        if (!alive) return;
+        setLeads(Object.fromEntries(found.leads.map((l) => [l.source_id, l])));
+      } catch {
+        // A results page that cannot reach the lead list is still a results
+        // page. The buttons simply do not appear.
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [forProduct]);
+
+  const onLeadChanged = useCallback((lead: Lead) => {
+    setLeads((prev) => ({ ...prev, [lead.source_id]: lead }));
+  }, []);
+
   const results = run?.results ?? [];
   const strong = results.filter((r) => r.score >= WEAK_BELOW);
   const weak = results.filter((r) => r.score < WEAK_BELOW);
@@ -239,7 +279,7 @@ export default function OpportunitiesRoute() {
         >
           <Box>
             <Typography variant="h4" sx={{ fontSize: 30 }}>
-              Opportunities on {shown === "github" ? "GitHub" : shown}
+              Opportunities on {platformName(shown)}
             </Typography>
 
             {/* Says which search this is. Without it a saved run and a new
@@ -354,7 +394,12 @@ export default function OpportunitiesRoute() {
           </Typography>
 
           {strong.map((o) => (
-            <OpportunityCard key={o.id} opportunity={o} />
+            <OpportunityCard
+              key={o.id}
+              opportunity={o}
+              lead={leads[o.id]}
+              onLeadChanged={onLeadChanged}
+            />
           ))}
 
           {strong.length === 0 && weak.length === 0 && (
@@ -375,7 +420,12 @@ export default function OpportunitiesRoute() {
               <AccordionDetails>
                 <Stack gap={2}>
                   {weak.map((o) => (
-                    <OpportunityCard key={o.id} opportunity={o} />
+                    <OpportunityCard
+              key={o.id}
+              opportunity={o}
+              lead={leads[o.id]}
+              onLeadChanged={onLeadChanged}
+            />
                   ))}
                 </Stack>
               </AccordionDetails>
@@ -408,7 +458,15 @@ export default function OpportunitiesRoute() {
 
 /* ------------------------------------------------------------------ */
 
-function OpportunityCard({ opportunity: o }: { opportunity: Opportunity }) {
+function OpportunityCard({
+  opportunity: o,
+  lead,
+  onLeadChanged,
+}: {
+  opportunity: Opportunity;
+  lead: Lead | undefined;
+  onLeadChanged: (lead: Lead) => void;
+}) {
   return (
     <Card variant="outlined">
       <CardContent>
@@ -500,6 +558,21 @@ function OpportunityCard({ opportunity: o }: { opportunity: Opportunity }) {
                 {o.reason}
               </Typography>
             )}
+
+            {/* Last, and below a rule: the judgement is what you read, this
+                is what you do about it once you have. */}
+            <Box
+              sx={{
+                mt: 2,
+                pt: 1.5,
+                borderTop: 1,
+                borderColor: "divider",
+                display: "flex",
+                justifyContent: "flex-end",
+              }}
+            >
+              <LeadActions lead={lead} onChanged={onLeadChanged} />
+            </Box>
           </Box>
         </Stack>
       </CardContent>

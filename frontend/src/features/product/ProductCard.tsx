@@ -5,10 +5,11 @@ import Chip from "@mui/material/Chip";
 import Divider from "@mui/material/Divider";
 import LinearProgress from "@mui/material/LinearProgress";
 import Link from "@mui/material/Link";
-import Paper from "@mui/material/Paper";
 import Stack from "@mui/material/Stack";
 import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
+
+import { Surface } from "@/components/ui";
 
 import ArticleOutlinedIcon from "@mui/icons-material/ArticleOutlined";
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
@@ -60,7 +61,7 @@ export default function ProductCard({ product, onView, onRecrawl, onDelete, busy
   const running = isRunning(product);
 
   return (
-    <Paper variant="outlined" sx={{ overflow: "hidden" }}>
+    <Surface interactive sx={{ overflow: "hidden" }}>
       {running && <LinearProgress />}
 
       <Stack sx={{ p: 2.25, pb: 1.75 }} spacing={0.75}>
@@ -180,6 +181,6 @@ export default function ProductCard({ product, onView, onRecrawl, onDelete, busy
           </span>
         </Tooltip>
       </Stack>
-    </Paper>
+    </Surface>
   );
 }

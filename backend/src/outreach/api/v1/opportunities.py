@@ -14,6 +14,7 @@ from datetime import datetime
 from fastapi import APIRouter, BackgroundTasks, HTTPException, status
 from pydantic import BaseModel
 
+from outreach import planner
 from outreach.api.deps import CurrentUser, DbSession
 from outreach.db.repositories import products as repo
 from outreach.db.repositories import search_runs as run_repo
@@ -66,10 +67,19 @@ async def start(
     if product is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No product with that id.")
 
-    if payload.platform != "github":
+    # Asked of the planner rather than hardcoded here.
+    #
+    # This was `!= "github"` and it outlived the Hacker News connector by a
+    # whole build: the connector worked, the plan offered the card, and the
+    # button answered "only GitHub is connected". A second list of what is
+    # runnable will always drift from the real one, so there is only the
+    # planner's now.
+    runnable = planner.SEARCHABLE - planner.COMING_SOON
+    if payload.platform not in runnable:
+        known = ", ".join(sorted(runnable)) or "nothing"
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
-            f"We cannot search {payload.platform} yet. Only GitHub is connected.",
+            f"We cannot search {payload.platform} yet. Connected: {known}.",
         )
 
     run_id = svc.start(
@@ -105,7 +115,10 @@ async def get_run(run_id: str, user: CurrentUser, session: DbSession) -> dict:
 
 @router.get("/products/{product_id}/last-search")
 async def last_search(
-    product_id: uuid.UUID, user: CurrentUser, session: DbSession
+    product_id: uuid.UUID,
+    user: CurrentUser,
+    session: DbSession,
+    platform: str | None = None,
 ) -> dict | None:
     """
     The most recent search for this product, or null if there has never been one.
@@ -113,12 +126,17 @@ async def last_search(
     Null rather than 404: "you have not searched yet" is an ordinary state
     for a new product, and making the home page treat it as an error would
     put a red box on the screen every time somebody adds one.
+
+    `?platform=github` narrows it to one source. Without it the answer is
+    whichever source ran last, which means searching Hacker News hides the
+    GitHub results and vice versa - both are still stored, they just had no
+    way to be asked for.
     """
     product = await repo.get_owned(session, product_id, user.id)
     if product is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No product with that id.")
 
-    return await svc.latest(session, product_id)
+    return await svc.latest(session, product_id, platform)
 
 
 class SearchSummary(BaseModel):

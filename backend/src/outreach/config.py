@@ -115,7 +115,15 @@ class Settings(BaseSettings):
     #: Commenting in a four-star repository reaches nobody. 500 keeps the
     #: established projects and removes the noise; 0 turns it off.
     min_repo_stars: int = 500
-
+    #: Ignore Hacker News stories below this many points.
+    #:
+    #: The equivalent of `min_repo_stars`, and it applies to stories only.
+    #: A story with two points sank without trace and replying to it reaches
+    #: nobody. Comments are never filtered on it: Algolia reports `points:
+    #: null` for every comment in the index, so judging them on that number
+    #: would silently delete the better half of the source - and on Hacker
+    #: News the comments are where somebody describes their actual problem.
+    min_hn_points: int = 3
     #: Per source, per run. Not a target: a ceiling, so one run cannot spend
     #: the whole organisation's rate limit.
     source_max_requests: int = Field(default=40, ge=1)

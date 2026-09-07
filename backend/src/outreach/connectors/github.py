@@ -80,7 +80,7 @@ class SearchResult(BaseModel):
 INTERSECT = "+"
 
 
-def render_phrase(phrase: str) -> str:
+def render_phrase(phrase: str, quote: bool = True) -> str:
     """
     One phrase to the search syntax it means.
 
@@ -96,6 +96,22 @@ def render_phrase(phrase: str) -> str:
     caching"` matches every post that mentions caching at all, tens of
     thousands of them, of which GitHub serves the first thousand.
 
+    ── `quote` ──────────────────────────────────────────────────────────
+
+    Off for Hacker News, and that is a difference in corpus size rather than
+    a difference in intent. GitHub search runs over millions of issues, so
+    an exact phrase is the narrowing that makes a term usable. Algolia's
+    Hacker News index is orders of magnitude smaller, and the same quoting
+    leaves nothing behind: measured over one year of comments, `slow AI
+    responses` matches 0 quoted and 94 unquoted, `context management issues`
+    3 and 180, `stale information` 14 and 2,225.
+
+    The `+` semantics are identical either way, which is the part that has
+    to be: a term means the same thing in a plan whichever source runs it.
+    Only how strictly a multi-word *side* is matched changes, and it changes
+    so that a term narrows to a usable set on each source rather than to the
+    same literal query.
+
     A `+` asks for the **intersection** instead: both concepts, anywhere in
     the post, in either order. Unquoted terms are ANDed by GitHub, which the
     quoting rule above hides. That is the form that finds the good posts,
@@ -105,6 +121,8 @@ def render_phrase(phrase: str) -> str:
     """
     parts = [p.strip().strip('"') for p in phrase.split(INTERSECT)]
     parts = [" ".join(p.split()) for p in parts if p.strip()]
+    if not quote:
+        return " ".join(parts)
     return " ".join(f'"{p}"' if " " in p else p for p in parts)
 
 

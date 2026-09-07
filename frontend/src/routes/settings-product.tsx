@@ -3,12 +3,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Alert from "@mui/material/Alert";
 import AlertTitle from "@mui/material/AlertTitle";
 import Box from "@mui/material/Box";
-import Paper from "@mui/material/Paper";
 import Snackbar from "@mui/material/Snackbar";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 
 import { Loading, PageHeader } from "@/components/StateBlocks";
+import { Surface } from "@/components/ui";
 import MarkdownDialog from "@/features/product/MarkdownDialog";
 import ProductCard from "@/features/product/ProductCard";
 import ProductForm from "@/features/product/ProductForm";
@@ -111,7 +111,7 @@ export default function SettingsProductRoute() {
   };
 
   return (
-    <Box sx={{ maxWidth: 860, mx: "auto", px: 2, py: { xs: 4, md: 6 } }}>
+    <Box sx={{ maxWidth: 980, mx: "auto", px: { xs: 2, sm: 3 }, py: { xs: 3, md: 4.5 } }}>
       <PageHeader eyebrow="Settings" title="Product websites">
         Give us a product and its website. We read the site once and keep it as one
         markdown document. It is never re-read on a schedule, only when you press
@@ -141,7 +141,7 @@ export default function SettingsProductRoute() {
       {backendUp === null || products === null ? (
         <Loading label="Checking the backend" />
       ) : products.length === 0 && backendUp ? (
-        <Paper variant="outlined" sx={{ p: 5, textAlign: "center" }}>
+        <Surface sx={{ px: 3, py: { xs: 6, md: 8 }, textAlign: "center" }}>
           <Typography variant="h6" sx={{ mb: 1 }}>
             No websites read yet
           </Typography>
@@ -149,7 +149,7 @@ export default function SettingsProductRoute() {
             Add a product above. Try your own first, so you can judge whether what
             comes back really describes it.
           </Typography>
-        </Paper>
+        </Surface>
       ) : (
         <Stack spacing={2}>
           {products.map((product) => (

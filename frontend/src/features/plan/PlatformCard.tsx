@@ -4,16 +4,17 @@ import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Chip from "@mui/material/Chip";
 import Divider from "@mui/material/Divider";
-import Paper from "@mui/material/Paper";
 import Stack from "@mui/material/Stack";
 import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
+import { alpha } from "@mui/material/styles";
 
 import SearchIcon from "@mui/icons-material/Search";
 
 import EditableChips from "./EditableChips";
 import RepoSuggest from "./RepoSuggest";
 import { platformIcon } from "./platformIcon";
+import { IconTile, Label, Surface, hairline } from "@/components/ui";
 import type { PlanPlatform } from "@/lib/productApi";
 import { MONO } from "@/styles/theme";
 
@@ -46,19 +47,8 @@ function warnTerm(term: string): string | null {
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <Box>
-      <Typography
-        variant="overline"
-        sx={{
-          display: "block",
-          fontSize: 10,
-          letterSpacing: ".1em",
-          color: "text.secondary",
-          lineHeight: 1.8,
-        }}
-      >
-        {label}
-      </Typography>
-      <Typography variant="body2" sx={{ lineHeight: 1.6 }}>
+      <Label>{label}</Label>
+      <Typography variant="body2" sx={{ lineHeight: 1.7, mt: 0.5 }}>
         {children}
       </Typography>
     </Box>
@@ -94,36 +84,32 @@ export default function PlatformCard({
       ? { label: "Connector coming", color: "warning" as const }
       : { label: "By hand", color: "default" as const };
 
-  // The one card you can act on is the only one that earns a coloured edge.
-  const accent = live ? "success.main" : "divider";
-
   const header = (
-    <Stack direction="row" alignItems="center" gap={1.25}>
-      <Box
-        sx={{
-          width: 34,
-          height: 34,
-          flexShrink: 0,
-          borderRadius: 1.5,
-          display: "grid",
-          placeItems: "center",
-          bgcolor: live ? "success.main" : "action.hover",
-          color: live ? "success.contrastText" : "text.secondary",
-        }}
-      >
-        <Icon sx={{ fontSize: 19 }} />
-      </Box>
+    <Stack direction="row" alignItems="center" gap={1.5}>
+      <IconTile tone={live ? "success" : "muted"} size={wide ? 42 : 36}>
+        <Icon />
+      </IconTile>
 
-      <Typography sx={{ fontWeight: 650, fontSize: 17, flex: 1, minWidth: 0 }} noWrap>
-        {platform.name}
-      </Typography>
+      <Box sx={{ flex: 1, minWidth: 0 }}>
+        <Typography
+          sx={{ fontWeight: 690, fontSize: wide ? 19 : 16.5, letterSpacing: "-.015em" }}
+          noWrap
+        >
+          {platform.name}
+        </Typography>
+        {wide && (
+          <Typography variant="caption" color="text.secondary">
+            Every recent issue and discussion becomes a candidate
+          </Typography>
+        )}
+      </Box>
 
       <Chip
         size="small"
         label={status.label}
-        color={status.color}
+        color={live ? "success" : status.color}
         variant={live ? "filled" : "outlined"}
-        sx={{ height: 22, fontSize: 11, flexShrink: 0 }}
+        sx={{ height: 23, fontSize: 11, flexShrink: 0, fontWeight: 600 }}
       />
     </Stack>
   );
@@ -140,20 +126,8 @@ export default function PlatformCard({
   if (!live && platform.targetPlaces.length > 0) {
     blocks.push(
       <Box key="where">
-        <Typography
-          variant="overline"
-          sx={{
-            display: "block",
-            fontSize: 10,
-            letterSpacing: ".1em",
-            color: "text.secondary",
-            lineHeight: 1.8,
-            mb: 0.5,
-          }}
-        >
-          Where
-        </Typography>
-        <Stack direction="row" flexWrap="wrap" gap={0.75}>
+        <Label>Where</Label>
+        <Stack direction="row" flexWrap="wrap" gap={0.75} sx={{ mt: 0.75 }}>
           {platform.targetPlaces.map((place) => (
             <Chip
               key={place}
@@ -168,7 +142,7 @@ export default function PlatformCard({
     );
   }
 
-  const narrative = <Stack gap={1.75}>{blocks}</Stack>;
+  const narrative = <Stack gap={2.25}>{blocks}</Stack>;
 
   /* The controls, on the live card only. */
   const tuning = live ? (
@@ -209,6 +183,7 @@ export default function PlatformCard({
         fullWidth
         startIcon={<SearchIcon />}
         onClick={() => onFindOpportunities(platform, terms, repos)}
+        sx={{ borderRadius: 2, py: 1.4, fontSize: 15 }}
       >
         Find opportunities on {platform.name}
       </Button>
@@ -216,7 +191,7 @@ export default function PlatformCard({
   ) : pending ? (
     <Tooltip title="The connector for this platform has not been built yet.">
       <span style={{ display: "block" }}>
-        <Button variant="outlined" disabled fullWidth>
+        <Button variant="outlined" disabled fullWidth sx={{ borderRadius: 2 }}>
           Not connected yet
         </Button>
       </span>
@@ -224,21 +199,22 @@ export default function PlatformCard({
   ) : null;
 
   return (
-    <Paper
-      variant="outlined"
-      sx={{
-        height: "100%",
-        display: "flex",
-        flexDirection: "column",
-        overflow: "hidden",
-        borderColor: accent,
-        // A hairline rather than a 2px border, so the emphasis does not
-        // shift the card's content box relative to its neighbours.
-        boxShadow: live ? (theme) => `inset 0 0 0 1px ${theme.palette.success.main}` : "none",
-      }}
+    <Surface
+      accent={live ? "success" : "none"}
+      interactive={!live}
+      sx={{ height: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}
     >
-      <Box sx={{ px: 2.5, pt: 2.25, pb: 2 }}>{header}</Box>
-      <Divider />
+      <Box
+        sx={{
+          px: { xs: 2.5, md: 3 },
+          pt: 2.5,
+          pb: 2.25,
+          borderBottom: 1,
+          borderColor: (t) => hairline(t),
+        }}
+      >
+        {header}
+      </Box>
 
       {wide && tuning ? (
         /* The live card. Narrative on the left, the controls you came for
@@ -251,14 +227,14 @@ export default function PlatformCard({
             alignItems: "stretch",
           }}
         >
-          <Box sx={{ p: 2.5 }}>{narrative}</Box>
+          <Box sx={{ p: { xs: 2.5, md: 3 } }}>{narrative}</Box>
           <Box
             sx={{
-              p: 2.5,
+              p: { xs: 2.5, md: 3 },
               borderLeft: { xs: 0, md: 1 },
               borderTop: { xs: 1, md: 0 },
-              borderColor: "divider",
-              bgcolor: "action.hover",
+              borderColor: (t) => hairline(t),
+              bgcolor: (t) => alpha(t.palette.text.primary, t.palette.mode === "dark" ? 0.03 : 0.02),
             }}
           >
             {tuning}
@@ -270,9 +246,9 @@ export default function PlatformCard({
         <Box
           sx={{
             flex: 1,
-            p: 2.5,
+            p: { xs: 2.5, md: 3 },
             display: "grid",
-            gap: 2.5,
+            gap: 3,
             alignItems: "start",
             gridTemplateColumns: { xs: "1fr", sm: "repeat(auto-fit, minmax(240px, 1fr))" },
           }}
@@ -280,18 +256,27 @@ export default function PlatformCard({
           {blocks}
         </Box>
       ) : (
-        <Stack sx={{ flex: 1, p: 2.5 }} gap={2.5}>
+        <Stack sx={{ flex: 1, p: { xs: 2.5, md: 3 } }} gap={2.5}>
           {narrative}
           {tuning}
         </Stack>
       )}
 
       {action && (
-        <>
-          <Divider />
-          <Box sx={{ p: 2 }}>{action}</Box>
-        </>
+        <Box
+          sx={{
+            p: { xs: 2.5, md: 3 },
+            pt: 0,
+            ...(wide && {
+              pt: { xs: 2.5, md: 3 },
+              borderTop: 1,
+              borderColor: (t) => hairline(t),
+            }),
+          }}
+        >
+          {action}
+        </Box>
       )}
-    </Paper>
+    </Surface>
   );
 }

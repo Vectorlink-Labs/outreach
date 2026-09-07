@@ -10,10 +10,13 @@ import Menu from "@mui/material/Menu";
 import MenuItem from "@mui/material/MenuItem";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
+import { alpha } from "@mui/material/styles";
 
 import AddIcon from "@mui/icons-material/Add";
-import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
+import CheckIcon from "@mui/icons-material/Check";
+import UnfoldMoreIcon from "@mui/icons-material/UnfoldMore";
 
+import { hairline } from "./ui";
 import { useSelectedProduct } from "@/lib/selectedProduct";
 import { MONO } from "@/styles/theme";
 
@@ -43,21 +46,48 @@ export default function ProductSwitcher() {
     <>
       <Button
         onClick={(e) => setAnchor(e.currentTarget)}
-        endIcon={<ExpandMoreIcon />}
+        endIcon={<UnfoldMoreIcon sx={{ fontSize: 16, opacity: 0.6 }} />}
         color="inherit"
         sx={{
-          maxWidth: { xs: 180, sm: 300 },
-          py: 0.5,
-          px: 1.25,
-          borderRadius: 1.5,
+          maxWidth: { xs: 170, sm: 280 },
+          py: 0.6,
+          pl: 0.75,
+          pr: 1.25,
+          gap: 0.75,
+          borderRadius: 2,
           border: 1,
-          borderColor: "divider",
-          "&:hover": { bgcolor: "action.hover" },
+          borderColor: (t) => hairline(t),
+          bgcolor: "background.paper",
+          "&:hover": {
+            bgcolor: (t) => alpha(t.palette.text.primary, 0.04),
+            borderColor: (t) => alpha(t.palette.primary.main, 0.4),
+          },
         }}
       >
+        {/* A monogram, so the switcher reads as a thing you own rather than
+            as a dropdown. Two products with similar names are told apart by
+            colour before either is read. */}
+        <Box
+          sx={{
+            width: 24,
+            height: 24,
+            flexShrink: 0,
+            borderRadius: 1.5,
+            display: "grid",
+            placeItems: "center",
+            fontSize: 11,
+            fontWeight: 800,
+            color: "primary.main",
+            border: 1,
+            borderColor: (t) => alpha(t.palette.primary.main, 0.3),
+            bgcolor: (t) => alpha(t.palette.primary.main, 0.12),
+          }}
+        >
+          {(selected?.name ?? "?").slice(0, 1).toUpperCase()}
+        </Box>
         <Box sx={{ minWidth: 0, textAlign: "left" }}>
           <Typography
-            sx={{ fontWeight: 650, fontSize: 13.5, lineHeight: 1.25 }}
+            sx={{ fontWeight: 660, fontSize: 13.5, lineHeight: 1.3, letterSpacing: "-.01em" }}
             noWrap
           >
             {selected?.name ?? "Choose a product"}
@@ -84,7 +114,7 @@ export default function ProductSwitcher() {
         onClose={() => setAnchor(null)}
         anchorOrigin={{ vertical: "bottom", horizontal: "left" }}
         transformOrigin={{ vertical: "top", horizontal: "left" }}
-        slotProps={{ paper: { sx: { minWidth: 280, maxWidth: 380 } } }}
+        slotProps={{ paper: { sx: { minWidth: 296, maxWidth: 400, mt: 1 } } }}
       >
         {products.map((product) => (
           <MenuItem
@@ -92,6 +122,17 @@ export default function ProductSwitcher() {
             selected={product.id === selected?.id}
             onClick={() => choose(product.id)}
           >
+            <Box
+              sx={{
+                width: 16,
+                mr: 1.25,
+                flexShrink: 0,
+                display: "flex",
+                color: "primary.main",
+              }}
+            >
+              {product.id === selected?.id && <CheckIcon sx={{ fontSize: 16 }} />}
+            </Box>
             <ListItemText
               primary={
                 <Stack direction="row" alignItems="center" gap={1}>
@@ -124,7 +165,9 @@ export default function ProductSwitcher() {
             navigate("/new");
           }}
         >
-          <AddIcon fontSize="small" sx={{ mr: 1.25, color: "text.secondary" }} />
+          <Box sx={{ width: 16, mr: 1.25, display: "flex", color: "text.secondary" }}>
+            <AddIcon sx={{ fontSize: 16 }} />
+          </Box>
           <Typography sx={{ fontSize: 14 }}>New product</Typography>
         </MenuItem>
       </Menu>

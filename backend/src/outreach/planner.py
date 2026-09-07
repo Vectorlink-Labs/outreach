@@ -34,7 +34,7 @@ CHAT_URL = "https://api.openai.com/v1/chat/completions"
 PROMPT_PATH = Path(__file__).parent / "llm" / "prompts" / "planner.v1.md"
 #: Bump on every prompt change: it is part of `source_hash`, so this is what
 #: makes existing plans regenerate instead of sticking to the old rubric.
-PROMPT_VERSION = "planner.v8"
+PROMPT_VERSION = "planner.v10"
 
 #: Platforms we can actually search. Everything else is advice only.
 #: The model is not asked to decide this - we know it, and letting it guess
@@ -43,7 +43,12 @@ SEARCHABLE = {"github", "hackernews"}
 
 #: Not yet built, but the plan may still recommend it. Shown as "coming soon"
 #: rather than as something you can run today.
-COMING_SOON = {"hackernews"}
+#:
+#: Empty since the Hacker News connector landed. Kept rather than deleted
+#: because the distinction it draws is the useful one: "we cannot search
+#: this yet" and "we never will" set completely different expectations, and
+#: the next connector will want to sit here while it is being written.
+COMING_SOON: set[str] = set()
 
 
 class Platform(BaseModel):
@@ -263,6 +268,26 @@ def _usable_terms(terms: list[str]) -> list[str]:
     return kept
 
 
+#: Words too broad to be half of an intersection.
+#:
+#: `prompt caching + RAG` narrows because both halves name something. `data
+#: updates + AI` does not, because `AI` appears in most of the corpus and
+#: matching on it excludes nothing - the term is a single phrase wearing a
+#: `+`, and it comes back with hundreds of posts about nothing in particular.
+#:
+#: Two prompt revisions asked for this and two plans ignored it, which is the
+#: usual sign that a rule belongs in code. The broad side is stripped rather
+#: than the whole term dropped: `response time + AI` still has a real concept
+#: in it, and `response time` is a term worth running.
+BROAD_SIDES = frozenset(
+    {
+        "ai", "llm", "llms", "ml", "model", "models", "data", "software",
+        "app", "apps", "system", "systems", "tool", "tools", "code",
+        "agent", "agents", "api", "apis", "user", "users", "product",
+    }
+)
+
+
 def _clean_term(term: str) -> str | None:
     """
     One term normalised, or None when its shape cannot match anything.
@@ -279,6 +304,18 @@ def _clean_term(term: str) -> str | None:
     sides = [s for s in sides if s]
     if not sides or len(sides) > 2:
         return None
+
+    # Drop a side that narrows nothing, keeping whatever real concept the
+    # term had. Only when there is another side to fall back on - a bare
+    # `AI` with nothing beside it fails the length rule below anyway.
+    if len(sides) == 2:
+        useful = [s for s in sides if s.lower() not in BROAD_SIDES]
+        # Both halves broad means the term narrows nothing at all, and
+        # keeping either one would leave a single word that matches the
+        # whole corpus. `AI + LLM` is not a search.
+        if not useful:
+            return None
+        sides = useful
     if any(len(s.split()) > 3 for s in sides):
         return None
     # A single side must still carry enough to be a phrase rather than a

@@ -424,8 +424,15 @@ export const productApi = {
    * Null is a state, not a failure: a product added a minute ago has never
    * been searched, and that is the normal case rather than an error.
    */
-  async lastSearch(productId: string): Promise<OpportunityRun | null> {
-    return request<OpportunityRun | null>(`/products/${productId}/last-search`);
+  async lastSearch(
+    productId: string,
+    platform?: string,
+  ): Promise<OpportunityRun | null> {
+    // Without a platform this is whichever source ran last, so searching
+    // Hacker News hides the GitHub results. Both are stored; they just had
+    // no way to be asked for separately.
+    const q = platform ? `?platform=${encodeURIComponent(platform)}` : "";
+    return request<OpportunityRun | null>(`/products/${productId}/last-search${q}`);
   },
 
   /**
@@ -434,6 +441,29 @@ export const productApi = {
    */
   async searchHistory(productId: string): Promise<SearchSummary[]> {
     return request<SearchSummary[]>(`/products/${productId}/searches`);
+  },
+
+  /**
+   * Every lead for a product, best first, with the counts beside them.
+   *
+   * A lead outlives the search that found it, which is the whole point:
+   * marking one replied has to survive the next run, and "new since last
+   * time" has to mean something.
+   */
+  async leads(productId: string): Promise<LeadList> {
+    return request<LeadList>(`/products/${productId}/leads`);
+  },
+
+  /** Move a lead. Omitting `note` leaves any existing note alone. */
+  async updateLead(
+    leadId: string,
+    state: LeadState,
+    note?: string | null,
+  ): Promise<Lead> {
+    return request<Lead>(`/leads/${leadId}`, {
+      method: "PATCH",
+      body: JSON.stringify(note === undefined ? { state } : { state, note }),
+    });
   },
 
   /**
@@ -499,6 +529,29 @@ export interface OpportunityStage {
 }
 
 /** One line of search history. The results are not in it; opening one loads them. */
+export type LeadState = "new" | "replied" | "ignored" | "won";
+
+export interface Lead {
+  id: string;
+  /** GitHub's node id. What ties a lead to a result across every run. */
+  source_id: string;
+  url: string;
+  title: string;
+  container: string | null;
+  state: LeadState;
+  note: string | null;
+  score: number;
+  first_seen_at: string;
+  last_seen_at: string;
+  acted_at: string | null;
+}
+
+export interface LeadList {
+  leads: Lead[];
+  /** Always for the whole product, never the filtered view. */
+  counts: Record<LeadState, number>;
+}
+
 export interface SearchSummary {
   id: string;
   platform: string;
