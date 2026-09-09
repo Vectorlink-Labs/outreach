@@ -31,6 +31,19 @@ const toUser = (raw: RawUser): User => ({
   lastLoginAt: raw.last_login_at,
 });
 
+export interface ForgotPasswordResult {
+  message: string;
+  /** Whether mail actually left the server. False when none is configured. */
+  sent: boolean;
+  /**
+   * The reset link, and only ever present on a local machine with no mail
+   * server. It is how development finishes a reset at all; anywhere else
+   * the server withholds it, because returning it would let anyone reset
+   * anyone's password just by asking.
+   */
+  link: string | null;
+}
+
 const BASE = "/api/v1";
 
 export class AuthError extends Error {
@@ -100,6 +113,29 @@ export const authApi = {
 
   async logOut(): Promise<void> {
     await request<void>("/auth/logout", { method: "POST" });
+  },
+
+  /**
+   * Ask for a reset link.
+   *
+   * Answers the same way whether or not the address has an account, so the
+   * screen must never try to read "did this email exist" out of it.
+   */
+  async forgotPassword(email: string): Promise<ForgotPasswordResult> {
+    return request<ForgotPasswordResult>("/auth/forgot-password", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    });
+  },
+
+  /** Set a new password from a link, and sign in. */
+  async resetPassword(token: string, password: string): Promise<User> {
+    return toUser(
+      await request<RawUser>("/auth/reset-password", {
+        method: "POST",
+        body: JSON.stringify({ token, password }),
+      }),
+    );
   },
 
   /** The signed-in account, or null. Called once when the app loads. */

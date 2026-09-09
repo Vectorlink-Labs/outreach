@@ -14,6 +14,8 @@ Two rules worth stating, because both are easy to get wrong quietly:
 
 from __future__ import annotations
 
+import hashlib
+import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -81,3 +83,39 @@ def read_session_token(token: str) -> uuid.UUID | None:
         return uuid.UUID(payload["sub"])
     except (jwt.PyJWTError, KeyError, ValueError):
         return None
+
+
+# ---------------------------------------------------------- password resets
+
+#: How long a reset link works for.
+#:
+#: An hour is the usual compromise: long enough to survive a slow mail
+#: server and somebody reading their email after lunch, short enough that a
+#: link left sitting in an inbox stops being a key to the account.
+RESET_TTL = timedelta(hours=1)
+
+#: 32 bytes of randomness, url-safe. Long enough that guessing is not a
+#: strategy, which is why this is hashed with sha256 rather than argon2 -
+#: there is no dictionary to slow an attacker down through.
+_RESET_BYTES = 32
+
+
+def new_reset_token() -> tuple[str, str]:
+    """
+    Returns (token, token_hash).
+
+    The token goes in the link and is never stored. The hash is stored and
+    never leaves the server, so a copy of the database is not a set of
+    skeleton keys to every account in it.
+    """
+    token = secrets.token_urlsafe(_RESET_BYTES)
+    return token, hash_reset_token(token)
+
+
+def hash_reset_token(token: str) -> str:
+    """Plain sha256, so the row can be found *by* the hash."""
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def reset_expiry() -> datetime:
+    return datetime.now(UTC) + RESET_TTL

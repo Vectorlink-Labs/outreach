@@ -30,6 +30,17 @@ class Settings(BaseSettings):
     #: Send the cookie over https only. False locally because dev is http.
     cookie_secure: bool = False
 
+    # ---- email -----------------------------------------------------------
+    #: Where the app lives, for links inside emails. The reset link has to
+    #: point at the screen a person clicks, not at this API.
+    app_url: str = "http://localhost:5173"
+
+    #: Empty means no mail can be sent. The reset link is then written to the
+    #: server log instead, and the API says plainly that nothing was sent -
+    #: a reset flow that silently delivers nothing is worse than one that
+    #: admits it.
+    smtp_host: str = ""
+
     # ---- database --------------------------------------------------------
     database_url: str = "postgresql+asyncpg://outreach:outreach@localhost:5432/outreach"
     db_echo: bool = False

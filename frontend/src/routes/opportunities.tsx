@@ -17,20 +17,24 @@ import Typography from "@mui/material/Typography";
 
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
+import EditNoteIcon from "@mui/icons-material/EditNote";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import HistoryIcon from "@mui/icons-material/History";
 import OpenInNewIcon from "@mui/icons-material/OpenInNew";
 import RadioButtonUncheckedIcon from "@mui/icons-material/RadioButtonUnchecked";
 import SearchIcon from "@mui/icons-material/Search";
 
+import ProductTabs from "@/components/ProductTabs";
 import { BAND_COLOR, WEAK_BELOW, platformName } from "@/features/opportunities/band";
 import LeadActions from "@/features/opportunities/LeadActions";
+import DraftDialog from "@/features/tracking/DraftDialog";
 import {
   productApi,
   type Lead,
   type Opportunity,
   type OpportunityRun,
 } from "@/lib/productApi";
+import type { DraftRequest } from "@/lib/trackingApi";
 import { MONO } from "@/styles/theme";
 
 const POLL_MS = 2000;
@@ -87,6 +91,8 @@ export default function OpportunitiesRoute() {
    * as `id` - the key existed long before the table did. */
   const [leads, setLeads] = useState<Record<string, Lead>>({});
   const [error, setError] = useState<string | null>(null);
+  /* The post the reply dialog is open on. Null when it is closed. */
+  const [replyTo, setReplyTo] = useState<DraftRequest | null>(null);
 
   /* What this screen has already acted on.
    *
@@ -254,6 +260,8 @@ export default function OpportunitiesRoute() {
         py: { xs: 3, md: 5 },
       }}
     >
+      {backTo && <ProductTabs productId={backTo} />}
+
       <Box>
         {/* Which product this belongs to is not always known yet.
             Reopening by run id carries no product in the URL, so until the
@@ -399,6 +407,7 @@ export default function OpportunitiesRoute() {
               opportunity={o}
               lead={leads[o.id]}
               onLeadChanged={onLeadChanged}
+              onReply={setReplyTo}
             />
           ))}
 
@@ -421,11 +430,12 @@ export default function OpportunitiesRoute() {
                 <Stack gap={2}>
                   {weak.map((o) => (
                     <OpportunityCard
-              key={o.id}
-              opportunity={o}
-              lead={leads[o.id]}
-              onLeadChanged={onLeadChanged}
-            />
+                      key={o.id}
+                      opportunity={o}
+                      lead={leads[o.id]}
+                      onLeadChanged={onLeadChanged}
+                      onReply={setReplyTo}
+                    />
                   ))}
                 </Stack>
               </AccordionDetails>
@@ -452,6 +462,14 @@ export default function OpportunitiesRoute() {
           )}
         </>
       )}
+
+      {/* One dialog for the whole page rather than one per card: only
+          ever one is open, and mounting forty would mount forty timers. */}
+      <DraftDialog
+        productId={backTo}
+        post={replyTo}
+        onClose={() => setReplyTo(null)}
+      />
     </Stack>
   );
 }
@@ -462,11 +480,32 @@ function OpportunityCard({
   opportunity: o,
   lead,
   onLeadChanged,
+  onReply,
 }: {
   opportunity: Opportunity;
   lead: Lead | undefined;
   onLeadChanged: (lead: Lead) => void;
+  onReply: (post: DraftRequest) => void;
 }) {
+  /* What the writer gets to work from.
+     The search result carries the person's own quote and the problem the
+     classifier read out of it, but not the full post body - nothing in the
+     pipeline keeps that. So the quote is the body, which is why the prompt
+     is written to cope with a short one. */
+  const asDraftRequest = (): DraftRequest => ({
+    source_id: o.id,
+    url: o.url,
+    title: o.title,
+    body: [o.evidence_quote && `They wrote: "${o.evidence_quote}"`, o.problem]
+      .filter(Boolean)
+      .join("\n\n"),
+    author: o.author,
+    container: o.container ?? "",
+    kind: o.kind,
+    score: o.score,
+    allow_mention: true,
+  });
+
   return (
     <Card variant="outlined">
       <CardContent>
@@ -567,7 +606,13 @@ function OpportunityCard({
             )}
 
             {/* Last, and below a rule: the judgement is what you read, this
-                is what you do about it once you have. */}
+                is what you do about it once you have.
+
+                Two halves of the same act, so they share one row. On the
+                left, writing the reply; on the right, recording that you
+                dealt with it. Splitting them across the card would leave
+                somebody drafting a reply and then hunting for where to
+                mark it off. */}
             <Box
               sx={{
                 mt: 2,
@@ -575,9 +620,21 @@ function OpportunityCard({
                 borderTop: 1,
                 borderColor: "divider",
                 display: "flex",
-                justifyContent: "flex-end",
+                alignItems: "center",
+                justifyContent: "space-between",
+                flexWrap: "wrap",
+                gap: 1.5,
               }}
             >
+              <Button
+                variant="outlined"
+                size="small"
+                startIcon={<EditNoteIcon />}
+                onClick={() => onReply(asDraftRequest())}
+              >
+                Draft a reply
+              </Button>
+
               <LeadActions lead={lead} onChanged={onLeadChanged} />
             </Box>
           </Box>

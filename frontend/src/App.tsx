@@ -5,6 +5,9 @@ import CssBaseline from "@mui/material/CssBaseline";
 import { ThemeProvider } from "@mui/material/styles";
 
 import AppShell from "@/components/AppShell";
+import ActivityRoute from "@/routes/activity";
+import ForgotPasswordRoute from "@/routes/forgot-password";
+import ResetPasswordRoute from "@/routes/reset-password";
 import { AuthProvider, RequireAuth } from "@/lib/auth";
 import { SelectedProductProvider } from "@/lib/selectedProduct";
 import BriefsRoute from "@/routes/briefs";
@@ -20,6 +23,7 @@ import ReviewPlanRoute from "@/routes/review-plan";
 import RunRoute from "@/routes/run";
 import SettingsProductRoute from "@/routes/settings-product";
 import SignUpRoute from "@/routes/signup";
+import TrackingRoute from "@/routes/tracking";
 import { createAppTheme } from "@/styles/theme";
 
 type Mode = "light" | "dark";
@@ -52,6 +56,10 @@ export default function App() {
             <Route path="/" element={<LandingRoute mode={mode} onToggleMode={toggle} />} />
             <Route path="/signup" element={<SignUpRoute />} />
             <Route path="/login" element={<LoginRoute />} />
+            {/* Public by necessity: somebody who cannot sign in is exactly
+                who these two screens are for. */}
+            <Route path="/forgot-password" element={<ForgotPasswordRoute />} />
+            <Route path="/reset-password" element={<ResetPasswordRoute />} />
 
             {/* ---------------------------------------------- private */}
             {/* The provider sits inside RequireAuth, so the product list is
@@ -68,9 +76,11 @@ export default function App() {
               }
             >
               <Route path="/home" element={<HomeRoute />} />
+              <Route path="/activity" element={<ActivityRoute />} />
               <Route path="/new" element={<NewProductRoute />} />
               <Route path="/products/:productId/reading" element={<ReadingWebsiteRoute />} />
               <Route path="/products/:productId/plan" element={<PlanRoute />} />
+              <Route path="/products/:productId/tracking" element={<TrackingRoute />} />
               <Route path="/opportunities" element={<OpportunitiesRoute />} />
               <Route path="/settings/product" element={<SettingsProductRoute />} />
 

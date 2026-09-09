@@ -11,7 +11,18 @@ export default defineConfig({
   },
   server: {
     port: 5173,
-    open: true,
+
+    // Deliberately not `open: true`.
+    //
+    // That opens a browser tab every time the dev server starts - and Vite
+    // restarts itself whenever this file changes, so editing the config, or
+    // pulling a branch that touched it, silently spawns another tab. From
+    // the keyboard it looks like whatever you last clicked opened one,
+    // which is a confusing thing to chase through the application code
+    // where no `target="_blank"` and no `window.open` exist.
+    //
+    // Open http://localhost:5173 yourself once and keep the tab.
+    open: false,
 
     // Serve beyond localhost, so a tunnel can reach the dev server.
     host: true,

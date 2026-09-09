@@ -37,3 +37,30 @@ class UserOut(BaseModel):
     email: str
     created_at: datetime
     last_login_at: datetime | None = None
+
+
+class ForgotPasswordIn(BaseModel):
+    email: EmailStr
+
+
+class ForgotPasswordOut(BaseModel):
+    """
+    Deliberately says the same thing whatever happened.
+
+    `sent` is about the mail transport, not about the account: it is False
+    when no mail server is configured, which is a fact about this
+    deployment. It never says whether the address belongs to an account.
+    """
+
+    message: str
+    sent: bool
+    #: Only ever filled in when the app is running locally with no mail
+    #: server. It is how development finishes a reset at all, and it is
+    #: withheld everywhere else because returning it would let anyone reset
+    #: anyone's password by asking.
+    link: str | None = None
+
+
+class ResetPasswordIn(BaseModel):
+    token: str = Field(min_length=1, max_length=200)
+    password: str = Field(min_length=MIN_PASSWORD, max_length=200)

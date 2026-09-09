@@ -107,15 +107,23 @@ export default function AppShell({ mode, onToggleMode, children }: Props) {
             </Typography>
           </Stack>
 
-          <Box
-            sx={{
-              width: "1px",
-              height: 22,
-              bgcolor: (t) => hairline(t),
-              mx: { xs: 0.5, md: 1 },
-              display: { xs: "none", sm: "block" },
-            }}
-          />
+
+          <Stack direction="row" spacing={1} sx={{ justifySelf: "center" }}>
+            <Button component={RouterLink} to="/home" size="small" color="inherit">
+              Home
+            </Button>
+            {/* Account-wide, not per product: "is this tool worth the time"
+                is not a question any single product can answer. */}
+            <Button component={RouterLink} to="/activity" size="small" color="inherit">
+              Activity
+            </Button>
+            <Button component={RouterLink} to="/settings/product" size="small" color="inherit">
+              Products
+            </Button>
+            <Button component={RouterLink} to="/new" size="small" variant="outlined">
+              New product
+            </Button>
+          </Stack>
 
           <ProductSwitcher />
 

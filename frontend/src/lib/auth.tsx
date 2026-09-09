@@ -19,6 +19,8 @@ interface AuthState {
   signUp: (name: string, email: string, password: string) => Promise<void>;
   logIn: (email: string, password: string) => Promise<void>;
   logOut: () => Promise<void>;
+  /** Re-read the session, for anything that signs in without these forms. */
+  refresh: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthState | null>(null);
@@ -73,9 +75,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  /* Re-read the session from the server.
+   *
+   * For the paths that get signed in by something other than the two forms
+   * above - a password reset sets the cookie in its own response, and
+   * without this the app still believes nobody is signed in and bounces
+   * straight back to the login page. */
+  const refresh = useCallback(async () => {
+    setUser(await authApi.me());
+  }, []);
+
   const value = useMemo(
-    () => ({ user, loading, signUp, logIn, logOut }),
-    [user, loading, signUp, logIn, logOut],
+    () => ({ user, loading, signUp, logIn, logOut, refresh }),
+    [user, loading, signUp, logIn, logOut, refresh],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

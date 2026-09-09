@@ -85,6 +85,17 @@ export default function LoginRoute() {
           onChange={(e) => setPassword(e.target.value)}
         />
 
+        {/* Under the password field and above the button, which is where
+            somebody looks the moment the password they typed is refused. */}
+        <Link
+          component={RouterLink}
+          to="/forgot-password"
+          variant="body2"
+          sx={{ alignSelf: "flex-end", mt: -1 }}
+        >
+          Forgotten your password?
+        </Link>
+
         <Button type="submit" variant="contained" size="large" disabled={busy} sx={{ py: 1.3 }}>
           {busy ? "Signing in…" : "Sign in"}
         </Button>
