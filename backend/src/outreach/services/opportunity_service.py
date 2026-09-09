@@ -107,6 +107,32 @@ MAX_DISCUSSION_REQUESTS = 30
 #: keeps the run inside its limit.
 REPLAN_REQUEST_COST = 12
 
+#: Per-source override for how much of the ranked list the triage reads.
+#:
+#: Falls back to `settings.triage_pool`, which stays the deliberate cap for
+#: GitHub. Hacker News is listed separately because it was measured, not
+#: because it felt different:
+#:
+#:     same fetch, 297 candidates
+#:       pool 25   ->   3 clear matches, best result 20 (PROBLEM)
+#:       pool all  ->  16 clear matches, best result 36 (DIY_WORKAROUND)
+#:
+#: Five times the clear matches, and the best lead of the run - somebody
+#: cutting their Claude Code token spend by 80% - was invisible at 25.
+#:
+#: The reason is structural rather than a tuning accident. GitHub has
+#: repository sweeps, so even a mediocre top 25 contains posts from rooms
+#: chosen on purpose. Hacker News has no rooms: every candidate comes from a
+#: broad phrase match, and the embedding has only a comment's first line to
+#: rank on, so position 200 is no worse a bet than position 20.
+#:
+#: It is affordable because titles are cheap - 297 of them is about eight
+#: batched calls, well under a cent, and cached by content afterwards.
+TRIAGE_POOL: dict[str, int] = {
+    # 0 means every candidate.
+    "hackernews": 0,
+}
+
 #: How many of the triage's picks get read in full and scored.
 #:
 #: This number used to carry the whole selection problem and had to be large
@@ -132,6 +158,24 @@ REPLAN_REQUEST_COST = 12
 #: Watch the run notes rather than this line. The triage reports how many
 #: scored a clear match and were cut by this limit; while that number is
 #: zero, ten is genuinely enough, and when it is not, it says so.
+#: How far back each source is searched.
+#:
+#: Not one number, because "still worth replying to" means something
+#: different on each. A GitHub issue opened two months ago is usually still
+#: open, still subscribed to, and a reply is read. A Hacker News thread is
+#: finished within a few days of leaving the front page.
+#:
+#: Measured on one product's terms over ninety days: 48% of the Hacker News
+#: candidates were 31-90 days old - fetched, embedded, ranked and competing
+#: for triage slots against posts somebody could actually answer. Cutting to
+#: thirty days lost 26% of the volume and over half the Show HN launches,
+#: which accumulate in exactly that long tail.
+SEARCH_DAYS = {
+    "github": 90,
+    "hackernews": 30,
+}
+DEFAULT_SEARCH_DAYS = 90
+
 CLASSIFY_TOP = 10
 
 
@@ -446,9 +490,10 @@ async def execute(run_id: str) -> None:
         # version is that embedding rank and result quality are close to
         # unrelated here, so a tight pool decides the run before anything has
         # read a title.
+        cap = TRIAGE_POOL.get(run["platform"], settings.triage_pool)
         pool = conversations
-        if settings.triage_pool:
-            pool = conversations[: settings.triage_pool]
+        if cap:
+            pool = conversations[:cap]
             if len(conversations) > len(pool):
                 run["notes"].append(
                     f"triage pool: reading the top {len(pool)} of "
@@ -531,7 +576,7 @@ async def _fetch(
     if platform == "hackernews":
         found = await hackernews.search(
             terms,
-            days=90,
+            days=SEARCH_DAYS.get("hackernews", DEFAULT_SEARCH_DAYS),
             # Algolia costs nothing and answers fast, so the budget is about
             # politeness rather than quota. There are no repository sweeps
             # here either - every result comes from a phrase - so the same
@@ -553,7 +598,7 @@ async def _fetch(
         github.search(
             terms,
             repos=places,
-            days=90,
+            days=SEARCH_DAYS.get("github", DEFAULT_SEARCH_DAYS),
             max_requests=budget,
             outsiders_only=settings.outsiders_only,
             min_repo_stars=settings.min_repo_stars,
@@ -599,7 +644,8 @@ async def _discussions(
         return await github_discussions.search(
             terms,
             repos=places,
-            days=90,
+            # Discussions are half of GitHub, so they share GitHub's window.
+            days=SEARCH_DAYS.get("github", DEFAULT_SEARCH_DAYS),
             max_requests=MAX_DISCUSSION_REQUESTS,
             outsiders_only=settings.outsiders_only,
             min_repo_stars=settings.min_repo_stars,

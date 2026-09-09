@@ -57,7 +57,18 @@ export default function HomeRoute() {
   const [runError, setRunError] = useState<string | null>(null);
   const [loadingRun, setLoadingRun] = useState(false);
 
+  /* Which source is being reviewed.
+   *
+   * Empty means "whatever ran last", which is the right answer before any
+   * history has loaded and the wrong one after: a product searched on both
+   * could only ever see the newer source, and the older one's results were
+   * reachable only by hunting through Earlier searches for a small label. */
+  const [platform, setPlatform] = useState("");
+
   const productId = selected?.id ?? "";
+
+  // A source chosen for one product means nothing for the next one.
+  useEffect(() => setPlatform(""), [productId]);
 
   useEffect(() => {
     if (!productId) {
@@ -75,7 +86,7 @@ export default function HomeRoute() {
         // Together, because the history is what tells you whether the last
         // search is the only one or the newest of ten.
         const [found, past] = await Promise.all([
-          productApi.lastSearch(productId),
+          productApi.lastSearch(productId, platform || undefined),
           productApi.searchHistory(productId),
         ]);
         if (cancelled) return;
@@ -84,7 +95,12 @@ export default function HomeRoute() {
         setRunError(null);
 
         if (found && found.state === "failed") {
-          const good = past.find((h) => h.state === "succeeded" && h.result_count > 0);
+          const good = past.find(
+            (h) =>
+              (!platform || h.platform === platform) &&
+              h.state === "succeeded" &&
+              h.result_count > 0,
+          );
           if (good) {
             const recovered = await productApi.opportunityRun(good.id);
             if (!cancelled) setFallback(recovered);
@@ -124,7 +140,7 @@ export default function HomeRoute() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [productId]);
+  }, [productId, platform]);
 
   if (error) {
     return (
@@ -185,6 +201,22 @@ export default function HomeRoute() {
   const results = shown?.results ?? [];
   const top = results.slice(0, PREVIEW);
   const best = top[0]?.score ?? 0;
+
+  /* Tabs come from what has actually been searched, newest source first.
+   *
+   * Not from the plan. Home is where results are reviewed, not where
+   * searches are started, so offering a tab for a source with nothing
+   * behind it would be an empty promise - the plan page is where a new
+   * source gets run for the first time. */
+  const sources: string[] = [];
+  for (const entry of history) {
+    if (!sources.includes(entry.platform)) sources.push(entry.platform);
+  }
+
+  // Which source the rows below belong to. Blank until a tab is pressed,
+  // and then it is whatever the newest run happened to be.
+  const viewing = platform || run?.platform || sources[0] || "github";
+  const earlier = history.filter((h) => h.platform === viewing).slice(1);
 
   return (
     <Page>
@@ -252,7 +284,7 @@ export default function HomeRoute() {
             </Button>
             <Button
               component={RouterLink}
-              to={`/opportunities?product=${productId}&platform=${run?.platform ?? "github"}`}
+              to={`/opportunities?product=${productId}&platform=${viewing}`}
               variant="contained"
               startIcon={<SearchIcon />}
               disabled={running}
@@ -310,6 +342,53 @@ export default function HomeRoute() {
               : "The website has not been read yet, so a search would have nothing to match against."}
           </Typography>
         </Surface>
+      )}
+
+      {sources.length > 1 && (
+        <Stack direction="row" gap={0.75} sx={{ mt: -1 }}>
+          {sources.map((key) => {
+            const active = key === viewing;
+            const runs = history.filter((h) => h.platform === key).length;
+            return (
+              <Box
+                component="button"
+                key={key}
+                onClick={() => setPlatform(key)}
+                sx={{
+                  px: 2,
+                  py: 1,
+                  border: 1,
+                  cursor: "pointer",
+                  borderRadius: 2,
+                  font: "inherit",
+                  fontSize: 13.5,
+                  fontWeight: active ? 660 : 560,
+                  color: active ? "primary.main" : "text.secondary",
+                  borderColor: (t) =>
+                    active ? alpha(t.palette.primary.main, 0.4) : hairline(t),
+                  bgcolor: (t) =>
+                    active ? alpha(t.palette.primary.main, 0.09) : "background.paper",
+                  transition: "background-color .18s ease, border-color .18s ease",
+                  "&:hover": {
+                    bgcolor: (t) =>
+                      alpha(
+                        active ? t.palette.primary.main : t.palette.text.primary,
+                        0.07,
+                      ),
+                  },
+                }}
+              >
+                {platformName(key)}
+                <Box
+                  component="span"
+                  sx={{ ml: 0.75, opacity: 0.6, fontWeight: 560, fontSize: 12 }}
+                >
+                  {runs}
+                </Box>
+              </Box>
+            );
+          })}
+        </Stack>
       )}
 
       {run && (
@@ -423,14 +502,14 @@ export default function HomeRoute() {
       {/* ------------------------------------------------------- history */}
       {/* Everything before the newest one. Opening any of them reads the
           stored result and never starts another search. */}
-      {history.length > 1 && (
+      {earlier.length > 0 && (
         <Box component="section">
           <SectionHead
-            title="Earlier searches"
+            title={`Earlier ${platformName(viewing)} searches`}
             hint="Saved results. Opening one costs nothing."
           />
           <Surface sx={{ overflow: "hidden" }}>
-            {history.slice(1).map((entry) => (
+            {earlier.map((entry) => (
               <Stack
                 key={entry.id}
                 component={RouterLink}
@@ -461,7 +540,6 @@ export default function HomeRoute() {
                         : "Still running"}
                   </Typography>
                   <Typography variant="caption" color="text.secondary">
-                    {platformName(entry.platform)} ·{" "}
                     {when(entry.started_at)}
                   </Typography>
                 </Box>

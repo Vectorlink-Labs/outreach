@@ -160,6 +160,77 @@ def clean_text(raw: str | None) -> str:
     return html.unescape(text).strip()
 
 
+#: How much of a comment stands in for its title.
+#:
+#: Long enough to carry a claim, short enough to scan in a list. The triage
+#: truncates at 160 characters anyway.
+HEADLINE_CHARS = 150
+
+
+def headline(body: str) -> str:
+    """
+    A comment's own opening, to stand where a story would have a title.
+
+    ── Why a comment cannot borrow its thread's title ───────────────────
+
+    Algolia gives a comment `story_title` and nothing else title-shaped, so
+    the obvious mapping is to use it. That is wrong in a way that is easy to
+    miss, because the result looks perfectly reasonable on screen.
+
+    Everything downstream reads `title`. The triage reads *only* titles - it
+    is what picks 25 candidates out of several hundred - so with the thread
+    title there, every comment in a thread is judged by the same string, and
+    what the person actually wrote is invisible to the one stage that
+    decides whether anybody reads it. On one real run that hid a comment
+    asking "Does anyone know what the impact on prompt caching is?" beneath
+    a headline about somebody else's coding agent, scored 4.
+
+    It reads wrong too: the card showed the thread title as the headline and
+    again underneath as the container, so a lead was displayed under the
+    name of a product it had nothing to do with.
+
+    The thread still matters, and it stays in `container` - that is context
+    for a remark, not the remark.
+    """
+    text = " ".join(body.split())
+    if not text:
+        return ""
+
+    # Prefer a whole first sentence when there is one of a sensible length;
+    # a hard character cut mid-clause reads worse than a slightly short one.
+    for stop in (". ", "? ", "! "):
+        head, sep, _ = text.partition(stop)
+        if sep and len(head) <= HEADLINE_CHARS:
+            return head + sep.strip()
+
+    if len(text) <= HEADLINE_CHARS:
+        return text
+    return text[:HEADLINE_CHARS].rsplit(" ", 1)[0] + "..."
+
+
+#: Threads whose comments match everything and mean nothing.
+#:
+#: Hacker News runs a handful of recurring megathreads - the monthly hiring
+#: posts especially - where hundreds of people list every technology they
+#: have touched. A comment in one of those contains "LLM", "agents",
+#: "caching" and "retrieval" because somebody is describing a career, not a
+#: problem, so they match any technical vocabulary a plan can produce and
+#: crowd out real results. Dropped by thread rather than by content: the
+#: giveaway is where the comment is, not what it says.
+#:
+#: `[dead]` is Hacker News' own marker for a killed thread. Nobody is going
+#: to read a reply there.
+NOISE_THREADS = re.compile(
+    r"^\s*(\[dead\]"
+    r"|ask hn:\s*who('s| is| wants)"
+    r"|ask hn:\s*freelancer"
+    r"|who is hiring"
+    r"|who wants to be hired"
+    r"|freelancer\?\s*seeking freelancer)",
+    re.I,
+)
+
+
 def to_conversation(hit: dict) -> Conversation | None:
     """
     One Algolia hit to a Conversation. None when it cannot be used.
@@ -175,16 +246,21 @@ def to_conversation(hit: dict) -> Conversation | None:
             return None
 
         is_comment = "comment_text" in hit
+
+        # Before anything is built: a comment in a hiring megathread is
+        # somebody's CV, and it matches every technical term there is.
+        thread = str(hit.get("story_title") or hit.get("title") or "")
+        if NOISE_THREADS.match(thread):
+            return None
         body = clean_text(
             hit.get("comment_text") if is_comment else hit.get("story_text")
         )
-        title = (hit.get("story_title") if is_comment else hit.get("title")) or None
+        # A story is titled; a comment speaks for itself. See `headline`.
+        title = headline(body) if is_comment else (hit.get("title") or None)
 
         # A comment with nothing in it is a deleted one; Algolia keeps the
         # row. Nothing downstream can judge an empty post.
-        if is_comment and not body:
-            return None
-        if not is_comment and not title:
+        if not title:
             return None
 
         return Conversation(

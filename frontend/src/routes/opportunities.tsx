@@ -510,6 +510,12 @@ function OpportunityCard({
               {o.kind === "discussion" && (
                 <Chip size="small" label={o.category ?? "discussion"} color="info" variant="outlined" />
               )}
+              {/* A Hacker News comment is titled by its own opening line, so
+                  without this there is nothing on the card saying it is a
+                  reply in somebody else's thread rather than a post. */}
+              {o.kind === "comment" && (
+                <Chip size="small" label="comment" color="info" variant="outlined" />
+              )}
               {/* Only ever shown when false — an unanswered question is a gap
                   to fill, which is the whole reason to turn up. */}
               {o.is_answered === false && (
@@ -522,6 +528,7 @@ function OpportunityCard({
             </Stack>
 
             <Typography sx={{ fontFamily: MONO, fontSize: 11.5, color: "text.secondary", mb: 1.5 }}>
+              {o.kind === "comment" ? "in " : ""}
               {o.container} · @{o.author} · {o.engagement}
             </Typography>
 

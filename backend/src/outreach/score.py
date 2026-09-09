@@ -67,8 +67,26 @@ INTENT_WEIGHT = {
 COSINE_FLOOR = 0.25
 COSINE_CEILING = 0.55
 
-#: Days for a post's freshness contribution to halve.
-FRESHNESS_HALF_LIFE = 30.0
+#: Days for a post's freshness contribution to halve, per source.
+#:
+#: One number for both sources was a GitHub number applied to Hacker News,
+#: and it is wrong there in both directions. An open GitHub issue from two
+#: months ago is still live: it sits in the tracker, people are subscribed,
+#: and a reply is read. A Hacker News thread is finished within about three
+#: days of leaving the front page, so a reply to a month-old comment reaches
+#: nobody at all.
+#:
+#: At thirty days a post scored 0.50 whichever source it came from, which
+#: made a dead Hacker News thread look half as good as a live one, and left
+#: almost nothing between day 3 and day 7 - the window where a Hacker News
+#: reply is actually read.
+FRESHNESS_HALF_LIFE = {
+    "github": 30.0,
+    "hackernews": 7.0,
+}
+
+#: For a source with no measured opinion yet. The conservative middle.
+DEFAULT_HALF_LIFE = 21.0
 
 #: Engagement above this adds nothing more.
 ENGAGEMENT_SATURATION = 50.0
@@ -260,9 +278,13 @@ def _freshness(conversation: Conversation, now: datetime) -> float:
     flattens. Linear decay gets both ends wrong: it treats a two-day-old post
     as barely better than a ten-day-old one, and a ninety-day-old post as
     worthless when it is merely cold.
+
+    How fast depends on the source, because "still live" means different
+    things on each - see `FRESHNESS_HALF_LIFE`.
     """
     age_days = max((now - conversation.created_at).total_seconds() / 86400.0, 0.0)
-    return 0.5 ** (age_days / FRESHNESS_HALF_LIFE)
+    half_life = FRESHNESS_HALF_LIFE.get(conversation.source, DEFAULT_HALF_LIFE)
+    return 0.5 ** (age_days / half_life)
 
 
 def _reach(conversation: Conversation) -> float:

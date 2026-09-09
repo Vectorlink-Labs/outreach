@@ -275,3 +275,169 @@ def test_broad_halves_are_stripped(term, expected):
     the usual sign a rule belongs in code rather than in a prompt.
     """
     assert _clean_term(term) == expected
+
+# --------------------------------------------------- what a comment is called
+
+
+def test_a_comment_is_titled_by_what_it_says():
+    """
+    The bug this exists for.
+
+    Algolia gives a comment `story_title` and nothing else title-shaped, so
+    using it looks reasonable and quietly breaks the triage: that stage
+    reads *only* titles, so every comment in a thread arrives as the same
+    string and what the person wrote is invisible to the one step deciding
+    whether anybody reads it.
+    """
+    c = hn.to_conversation(
+        _comment(comment_text="<p>our bill tripled because we re-embed everything</p>")
+    )
+
+    assert c is not None
+    assert c.title == "our bill tripled because we re-embed everything"
+    # The thread is context for the remark, not the remark.
+    assert c.container == "Ask HN: how do you cache context?"
+    assert c.title != c.container
+
+
+def test_a_story_still_keeps_its_own_title():
+    c = hn.to_conversation(_story())
+    assert c is not None
+    assert c.title == "Prompt caching breaks with RAG retrieval"
+
+
+def test_a_long_comment_is_cut_at_a_sentence():
+    body = "We cache the prefix now. " + "Then a great deal more text follows. " * 8
+    c = hn.to_conversation(_comment(comment_text=body))
+
+    assert c is not None
+    assert c.title == "We cache the prefix now."
+
+
+def test_a_comment_with_no_sentence_break_is_cut_cleanly():
+    c = hn.to_conversation(_comment(comment_text="word " * 100))
+
+    assert c is not None
+    assert len(c.title) <= hn.HEADLINE_CHARS + 3
+    # Cut at a space, never mid-word.
+    assert c.title.endswith("...")
+    assert "  " not in c.title
+
+
+@pytest.mark.parametrize(
+    "thread",
+    [
+        "Ask HN: Who wants to be hired? (June 2026)",
+        "Ask HN: Who is hiring? (September 2026)",
+        "Ask HN: Freelancer? Seeking Freelancer? (August 2026)",
+        "[dead]",
+    ],
+)
+def test_hiring_megathreads_are_dropped(thread):
+    """
+    Hundreds of people listing every technology they have touched. A comment
+    there says "LLM", "agents" and "caching" because somebody is describing
+    a career, so it matches any plan and crowds out real results.
+    """
+    assert hn.to_conversation(_comment(story_title=thread)) is None
+
+
+@pytest.mark.parametrize(
+    "thread",
+    [
+        "Ask HN: how do you cache context?",
+        "Ask HN: Who owns the output of an LLM?",
+        "Show HN: BetterDB",
+    ],
+)
+def test_ordinary_ask_hn_threads_are_kept(thread):
+    """The filter is about four recurring megathreads, not Ask HN itself."""
+    assert hn.to_conversation(_comment(story_title=thread)) is not None
+
+# ----------------------------------------------- how fast each source ages
+
+
+def test_hacker_news_ages_far_faster_than_github():
+    """
+    One half-life for both was a GitHub number applied to Hacker News.
+
+    An open GitHub issue from a month ago is still live - in the tracker,
+    subscribed to, and a reply gets read. A Hacker News thread is finished
+    within days of leaving the front page, so the same 0.50 at thirty days
+    made a dead thread look half as good as a live one.
+    """
+    from datetime import UTC, datetime, timedelta
+
+    from outreach import score
+    from outreach.schemas.conversation import Conversation
+
+    now = datetime.now(UTC)
+
+    def fresh(source: str, days: int) -> float:
+        return score._freshness(
+            Conversation(
+                source=source,
+                source_id="x",
+                url="u",
+                created_at=now - timedelta(days=days),
+            ),
+            now,
+        )
+
+    # A month old: still half-worth on GitHub, effectively gone on HN.
+    assert fresh("github", 30) > 0.45
+    assert fresh("hackernews", 30) < 0.10
+
+    # And the days that matter on HN are actually separated.
+    assert fresh("hackernews", 3) - fresh("hackernews", 7) > 0.2
+
+
+def test_an_unknown_source_gets_the_middle_rather_than_a_crash():
+    """A connector added tomorrow must score, not raise."""
+    from datetime import UTC, datetime, timedelta
+
+    from outreach import score
+    from outreach.schemas.conversation import Conversation
+
+    now = datetime.now(UTC)
+    value = score._freshness(
+        Conversation(
+            source="reddit", source_id="x", url="u", created_at=now - timedelta(days=21)
+        ),
+        now,
+    )
+    assert 0.4 < value < 0.6
+
+
+def test_each_source_is_searched_over_its_own_window():
+    """
+    48% of one run's Hacker News candidates were 31-90 days old - fetched,
+    embedded and competing for triage slots against posts somebody could
+    still answer.
+    """
+    from outreach.services.opportunity_service import SEARCH_DAYS
+
+    assert SEARCH_DAYS["hackernews"] < SEARCH_DAYS["github"]
+
+
+def test_hacker_news_triages_more_than_github():
+    """
+    Measured, not assumed. Same 297 candidates:
+
+        pool 25   ->   3 clear, best result 20
+        pool all  ->  16 clear, best result 36
+
+    GitHub keeps its deliberate cap, because repository sweeps mean even a
+    mediocre top 25 comes from rooms chosen on purpose. Hacker News has no
+    rooms - every candidate is a broad phrase match ranked on a comment's
+    first line, so position 200 is no worse a bet than position 20.
+    """
+    from outreach.config import settings
+    from outreach.services.opportunity_service import TRIAGE_POOL
+
+    github = TRIAGE_POOL.get("github", settings.triage_pool)
+    hn = TRIAGE_POOL.get("hackernews", settings.triage_pool)
+
+    # 0 means "all", so it is not simply a larger number.
+    assert hn == 0 or hn > github
+    assert github == settings.triage_pool
