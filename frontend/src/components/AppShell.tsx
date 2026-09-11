@@ -31,6 +31,9 @@ interface Props {
 
 const NAV = [
   { to: "/home", label: "Home" },
+  // Account-wide, not per product: "is this tool worth the time" is not a
+  // question any single product can answer.
+  { to: "/activity", label: "Activity" },
   { to: "/settings/product", label: "Products" },
 ];
 
@@ -107,27 +110,14 @@ export default function AppShell({ mode, onToggleMode, children }: Props) {
             </Typography>
           </Stack>
 
-
-          <Stack direction="row" spacing={1} sx={{ justifySelf: "center" }}>
-            <Button component={RouterLink} to="/home" size="small" color="inherit">
-              Home
-            </Button>
-            {/* Account-wide, not per product: "is this tool worth the time"
-                is not a question any single product can answer. */}
-            <Button component={RouterLink} to="/activity" size="small" color="inherit">
-              Activity
-            </Button>
-            <Button component={RouterLink} to="/settings/product" size="small" color="inherit">
-              Products
-            </Button>
-            <Button component={RouterLink} to="/new" size="small" variant="outlined">
-              New product
-            </Button>
-          </Stack>
-
-          <ProductSwitcher />
-
+          {/* Everything else sits to the right of this. */}
           <Box sx={{ flex: 1 }} />
+
+          {/* Which product you are on, first in the right-hand group.
+              Before the links rather than after, because it is the context
+              they are read in - the switcher says *what* you are looking at
+              and the links say *which view of it*. */}
+          <ProductSwitcher />
 
           {/* ----------------------------------------------- navigation */}
           <Stack direction="row" gap={0.5} sx={{ display: { xs: "none", md: "flex" } }}>

@@ -230,9 +230,9 @@ export default function ActivityRoute() {
               By platform
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              Only GitHub is connected today. The others are listed so a zero
-              reads as &ldquo;not built yet&rdquo; rather than &ldquo;nobody is
-              talking about you there&rdquo;.
+              Platforms marked &ldquo;not connected&rdquo; are listed anyway, so
+              a zero there reads as &ldquo;not built yet&rdquo; rather than
+              &ldquo;nobody is talking about you there&rdquo;.
             </Typography>
 
             <Paper variant="outlined" sx={{ overflowX: "auto" }}>

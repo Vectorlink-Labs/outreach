@@ -12,6 +12,7 @@ import uuid
 
 from fastapi import APIRouter
 
+from outreach import planner
 from outreach.api.deps import CurrentUser, DbSession
 from outreach.db.repositories import activity as repo
 from outreach.db.repositories import products as product_repo
@@ -20,14 +21,18 @@ router = APIRouter(tags=["activity"])
 
 #: Every platform worth a row, whether or not it has been used.
 #:
-#: `connected` is the honest half. Reddit appears with zeroes and a reason,
-#: instead of being silently absent - a missing row reads as "we found you
-#: nothing there", which is a claim about Reddit rather than about us.
-PLATFORMS: list[dict[str, str | bool]] = [
-    {"key": "github", "name": "GitHub", "connected": True},
-    {"key": "hackernews", "name": "Hacker News", "connected": False},
-    {"key": "reddit", "name": "Reddit", "connected": False},
-    {"key": "linkedin", "name": "LinkedIn", "connected": False},
+#: Reddit appears with zeroes and a "not connected" tag, instead of being
+#: silently absent - a missing row reads as "we found you nothing there",
+#: which is a claim about Reddit rather than about us.
+#:
+#: Whether a row is connected is asked of the planner, not written here.
+#: This list used to say so itself, and Hacker News stayed "not connected"
+#: on this screen long after its connector shipped.
+PLATFORMS: list[dict[str, str]] = [
+    {"key": "github", "name": "GitHub"},
+    {"key": "hackernews", "name": "Hacker News"},
+    {"key": "reddit", "name": "Reddit"},
+    {"key": "linkedin", "name": "LinkedIn"},
 ]
 
 _EMPTY_SEARCH = {"searches": 0, "results": 0}
@@ -60,21 +65,22 @@ async def get_activity(
     # A platform the user somehow has data for but that is not in the list
     # above still gets a row: better an unexpected name on screen than
     # totals that do not add up to the sum of their parts.
-    known = {str(p["key"]) for p in PLATFORMS}
+    known = {p["key"] for p in PLATFORMS}
     extra = [
-        {"key": key, "name": key, "connected": False}
+        {"key": key, "name": key}
         for key in sorted((searches.keys() | replies.keys()) - known)
     ]
+    runnable = planner.SEARCHABLE - planner.COMING_SOON
 
     for platform in [*PLATFORMS, *extra]:
-        key = str(platform["key"])
+        key = platform["key"]
         found = searches.get(key, _EMPTY_SEARCH)
         wrote = replies.get(key, _EMPTY_REPLY)
         rows.append(
             {
                 "key": key,
                 "name": platform["name"],
-                "connected": platform["connected"],
+                "connected": key in runnable,
                 "searches": found["searches"],
                 "results": found["results"],
                 "written": wrote["written"],
