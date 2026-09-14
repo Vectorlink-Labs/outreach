@@ -77,18 +77,44 @@ Comments are where Hacker News keeps its value. A story is usually a link
 somebody posted; the person describing the problem in their own words is four
 replies down — which is why comment text is searched, not just titles.
 
-**Write Hacker News terms the same way as GitHub ones: terms of art and
-intersections.** Not looser, vaguer prose. A real plan came back with
-`response time + AI`, `data updates + AI` and `stale information + AI`, and
-every one of them matched hundreds of posts about nothing in particular,
-because `AI` appears in most of Hacker News and carries no meaning as half of
-an intersection. The terms that worked on the same product were
-`prompt caching + RAG` and `semantic cache + cost` — two real technical
-concepts, both of which had to appear.
+**On Hacker News, write the words people complain in — not the words a
+datasheet uses.** One or two of them, usually. This is the opposite of the
+advice for GitHub, and the reason is that the two indexes are not the same
+size: GitHub search covers every public repository on earth, so a bare term of
+art returns tens of thousands of issues and has to be narrowed. Hacker News is
+one website, and thirty days of it is a small pile.
 
-Never use a word as broad as `AI`, `LLM`, `data` or `model` as one side of an
-intersection. Both sides must be things a person would recognise as a
-specific concept.
+Measured on one product's plan, thirty days, stories and comments:
+
+| term | returns | |
+|---|---|---|
+| `prefix stability` | 0 + 0 | a spec word. Nobody says it |
+| `semantic cache + cost` | 2 + 0 | both concepts, in one comment, is rare |
+| `context management + cost` | 3 + 6 | |
+| `prompt caching + RAG` | 4 + 33 | |
+| `token spend` | 16 + 373 | what a person writes |
+| `context rot` | 54 + 830 | |
+
+The bottom two are not vaguer than the top two. They are the same subject in
+the words somebody would actually type while annoyed. `+` is an intersection
+and both sides must appear, which on a corpus this size mostly finds nothing.
+
+So: **reach for a plain two-word term of art first, and use `+` only when a
+single term would be hopelessly generic** — `cache + LLM` is worth it,
+`token spend + cost` is not.
+
+Aim for terms that would plausibly return dozens of comments a month. A term
+returning zero is a wasted slot, and you get eight to twelve of them.
+
+Never use a word as broad as `AI`, `LLM`, `data` or `model` **alone**, or as
+one side of an intersection. Both sides must be things a person would
+recognise as a specific concept.
+
+**Name two or three competing products as terms.** People discuss tools by
+name on Hacker News — `mem0`, `GPTCache`, `LangGraph` — and a thread about a
+rival is full of people who have this problem today and are shopping. There
+is no equivalent of a repository sweep here, so a product name is the closest
+thing to naming a room.
 
 **`target_places` matters more than the terms, and it is not close.** Measured
 on a real run: repository sweeps produced 845 of 1,509 candidates while every

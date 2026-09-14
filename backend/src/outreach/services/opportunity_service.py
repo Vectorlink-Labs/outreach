@@ -76,6 +76,14 @@ PAGES_PER_QUERY = 2
 MIN_REQUESTS = 15
 MAX_REQUESTS = 60
 
+#: The same ceiling for Hacker News, which is not paying the same bill.
+#:
+#: GitHub's 60 is two minutes of waiting on a rate limit. Algolia answers in
+#: about a tenth of a second and charges nothing, so this is a politeness
+#: ceiling on a free service rather than a quota - 48 requests is roughly
+#: fifteen seconds, spaced.
+HN_MAX_REQUESTS = 48
+
 #: Below this many queries, the run says so rather than letting the user read
 #: a starved search as a verdict on their market.
 THIN_PLAN = 10
@@ -130,7 +138,24 @@ REPLAN_REQUEST_COST = 12
 #: batched calls, well under a cent, and cached by content afterwards.
 TRIAGE_POOL: dict[str, int] = {
     # 0 means every candidate.
-    "hackernews": 0,
+    #
+    # ── Why Hacker News has a number rather than 0 ───────────────────────
+    #
+    # It was 0, and 0 was right when the fetch returned about 300 candidates:
+    # embedding rank is close to useless here, so reading every title was the
+    # only way to find the good ones. Measured, 25 titles produced 3 clear
+    # matches and a best score of 20; every title produced 16 and 36.
+    #
+    # Widening the search changed the arithmetic. Better phrases return three
+    # times the candidates, and 0 would have turned that straight into three
+    # times the triage calls. This is what keeps the token spend flat while
+    # the search gets bigger: fetch as much as Algolia will give us, embed it
+    # all - embedding a post costs a fraction of reading its title - and let
+    # the ranking choose which 300 titles are worth the model's attention.
+    #
+    # 300 is the volume the triage was already reading, so this is the same
+    # bill for a better pool, not a bigger one.
+    "hackernews": 300,
 }
 
 #: How many of the triage's picks get read in full and scored.
@@ -190,6 +215,32 @@ def _budget(terms: list[str], repos: list[str]) -> int:
     """
     queries = len(terms) + len(repos)
     return max(MIN_REQUESTS, min(MAX_REQUESTS, queries * PAGES_PER_QUERY))
+
+
+def _hn_budget(terms: list[str]) -> int:
+    """
+    Requests for one Hacker News run.
+
+    Its own function because the GitHub budget is rationing something. There,
+    a request is a slice of 30 a minute shared by everyone in the
+    organisation, and spending it is the whole reason that ceiling exists.
+
+    Algolia is free, unauthenticated, and answers in about a tenth of a
+    second. Nothing is being rationed here, so the old shared budget was not
+    protecting a limit - it was throwing away results. A real run said so
+    plainly: `stopped at the 15 request limit with 1 query still having more
+    to give`.
+
+    Each term becomes two queries, stories and comments, so the arithmetic is
+    doubled against GitHub's. `HN_MAX_REQUESTS` is a politeness ceiling on
+    somebody else's free service, and at a quarter of a second apart the whole
+    budget is about fifteen seconds of wall clock.
+
+    This does not move the token spend. What is fetched gets embedded, which
+    is cheap; how much of it a model *reads* is `TRIAGE_POOL`, and that is
+    pinned.
+    """
+    return max(MIN_REQUESTS, min(HN_MAX_REQUESTS, len(terms) * 2 * PAGES_PER_QUERY))
 
 
 class OpportunityError(Exception):
@@ -577,11 +628,7 @@ async def _fetch(
         found = await hackernews.search(
             terms,
             days=SEARCH_DAYS.get("hackernews", DEFAULT_SEARCH_DAYS),
-            # Algolia costs nothing and answers fast, so the budget is about
-            # politeness rather than quota. There are no repository sweeps
-            # here either - every result comes from a phrase - so the same
-            # number buys proportionally more.
-            max_requests=max(MIN_REQUESTS, budget),
+            max_requests=_hn_budget(terms),
             min_story_points=settings.min_hn_points,
         )
         run["notes"].extend(found.notes)

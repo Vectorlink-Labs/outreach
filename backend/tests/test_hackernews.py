@@ -441,3 +441,62 @@ def test_hacker_news_triages_more_than_github():
     # 0 means "all", so it is not simply a larger number.
     assert hn == 0 or hn > github
     assert github == settings.triage_pool
+
+
+def test_hacker_news_gets_its_own_request_budget():
+    """
+    The shared budget was rationing a free service.
+
+    A real run ended with `stopped at the 15 request limit with 1 query still
+    having more to give`, and the lead it was reaching for - an Ask HN post
+    scoring 36 the week before - was not in what came back.
+    """
+    from outreach.services.opportunity_service import (
+        HN_MAX_REQUESTS,
+        MIN_REQUESTS,
+        _budget,
+        _hn_budget,
+    )
+
+    terms = [f"term {i}" for i in range(7)]
+
+    # Every term is two queries here, stories and comments, so the same plan
+    # needs more requests than GitHub's arithmetic gives it.
+    assert _hn_budget(terms) > _budget(terms, [])
+    assert _hn_budget(terms) == 28
+
+    assert _hn_budget(["one"]) == MIN_REQUESTS  # the floor still holds
+    assert _hn_budget([f"t{i}" for i in range(50)]) == HN_MAX_REQUESTS
+
+
+def test_a_wider_search_does_not_cost_more_tokens():
+    """
+    The point of the pool cap: fetch more, read the same.
+
+    Embedding a post is a fraction of what reading its title costs, so the
+    fetch can triple while the number of model calls stays where it was.
+    """
+    import math
+
+    from outreach.classify import TRIAGE_BATCH
+    from outreach.services.opportunity_service import TRIAGE_POOL
+
+    pool = TRIAGE_POOL["hackernews"]
+    assert pool, "an uncapped pool turns a wider fetch straight into more calls"
+
+    # Whatever comes back from Algolia, this many triage requests and no more.
+    assert math.ceil(pool / TRIAGE_BATCH) <= 15
+
+
+def test_the_planner_is_told_what_hacker_news_terms_return():
+    """
+    The old advice was measured wrong, and produced `prefix stability`: a
+    term of art from a datasheet that matches nothing anybody has written.
+    """
+    from outreach import planner
+
+    text = planner.PROMPT_PATH.read_text(encoding="utf-8")
+
+    assert "prefix stability" in text
+    assert "the words people complain in" in text
+    assert "competing products as terms" in text

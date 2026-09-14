@@ -1,5 +1,46 @@
 # Outreach
 
+## Run it
+
+Two terminals, PowerShell, from the repository root. PostgreSQL must be running;
+the database and its tables are created on first startup.
+
+**Terminal 1 — backend** (http://localhost:8000, API docs at `/docs`)
+
+```powershell
+cd backend
+py -m venv .venv                                       # first time only
+.venv\Scripts\python.exe -m pip install -e ".[dev]"    # first time only
+copy .env.example .env                                 # first time only, then fill in the keys
+.venv\Scripts\python.exe -m uvicorn outreach.main:app --reload
+```
+
+**Terminal 2 — frontend** (http://localhost:5173 — open this one)
+
+```powershell
+cd frontend
+npm install                                            # first time only
+npm run dev
+```
+
+`.env` needs `DATABASE_URL`, `OPENAI_API_KEY` (ranking and judging) and
+`GITHUB_TOKEN` (raises GitHub search from 10 to 30 requests a minute). Setup
+details, including installing PostgreSQL, are in [backend/README.md](backend/README.md).
+
+### Tests, lint and build
+
+```powershell
+cd backend
+.venv\Scripts\python.exe -m pytest -q                  # test suite
+.venv\Scripts\python.exe -m ruff check src tests       # lint
+
+cd ..\frontend
+npm run build                                          # type-check and production build
+```
+
+---
+
+
 Finds public developer conversations where someone has the problem our product solves,
 ranks them by how good an opportunity they are, and shows the evidence behind every score.
 

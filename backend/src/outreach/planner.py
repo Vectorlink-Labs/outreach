@@ -34,7 +34,7 @@ CHAT_URL = "https://api.openai.com/v1/chat/completions"
 PROMPT_PATH = Path(__file__).parent / "llm" / "prompts" / "planner.v1.md"
 #: Bump on every prompt change: it is part of `source_hash`, so this is what
 #: makes existing plans regenerate instead of sticking to the old rubric.
-PROMPT_VERSION = "planner.v10"
+PROMPT_VERSION = "planner.v11"
 
 #: Platforms we can actually search. Everything else is advice only.
 #: The model is not asked to decide this - we know it, and letting it guess

@@ -195,18 +195,47 @@ def gate(
 
 
 TRIAGE_PROMPT_PATH = Path(__file__).parent / "llm" / "prompts" / "triage.v1.md"
-TRIAGE_VERSION = "triage.v2"
+TRIAGE_VERSION = "triage.v4"
 TRIAGE_CACHE_PATH = CACHE_PATH.parent / "triage.json"
 
-#: Titles per request. Big enough that the rubric is amortised over many
-#: titles, small enough that one malformed reply loses forty judgements
-#: rather than four hundred.
-TRIAGE_BATCH = 40
+#: Titles per request.
+#:
+#: ── Why this is not larger ───────────────────────────────────────────────
+#:
+#: It was 40, and at 40 the model stopped answering about most of them. One
+#: measured batch of 40 real Hacker News titles came back with **nine**
+#: scores, and every one of those nine was a 2 or a 3: it had returned the
+#: titles it liked and silently dropped the ones it rejected, because the
+#: instructions asked it to *filter* a list rather than score one.
+#:
+#: That is invisible from outside. The reply is valid JSON, the run finishes,
+#: and every skipped title takes the default below - 83% of a real cache was
+#: that default. What reaches the judge is then decided by embedding rank,
+#: which is the one thing this stage exists to correct.
+#:
+#: Twenty titles, an explicit count in the prompt, and a re-ask for whatever
+#: comes back missing. Roughly 1.5x the tokens of the old batch size, which is
+#: still a fraction of a cent per run.
+TRIAGE_BATCH = 20
 
 #: Below this a title is not worth the full judge. 2 is "plausibly this
 #: problem", and the whole design of the rubric is that an unsure title lands
 #: there rather than at 1.
 TRIAGE_KEEP_FROM = 2
+
+#: What a title is worth when the model would not score it.
+#:
+#: Below `TRIAGE_KEEP_FROM`, and deliberately different from what a *failed
+#: request* gets. The two look alike in the code and mean opposite things:
+#:
+#:   * the request failed - nothing was read, so its titles keep 2 and stay
+#:     eligible. Punishing a post for a network error would be absurd.
+#:   * the request succeeded and the model skipped this title twice, once in
+#:     its batch and again when asked on its own. That is an answer: it read
+#:     the title and declined to keep it.
+#:
+#: Scoring the second case 2 is what filled ten judge slots with chatter.
+TRIAGE_UNSCORED = 1
 
 
 async def triage(
@@ -281,7 +310,8 @@ async def triage(
                         return
 
                 for offset, position in enumerate(batch):
-                    score = got.get(offset, TRIAGE_KEEP_FROM)
+                    # Missing after the re-ask is a judgement, not a gap.
+                    score = got.get(offset, TRIAGE_UNSCORED)
                     scores[position] = score
                     cache[_triage_key(conversations[position], product)] = score
 
@@ -342,12 +372,49 @@ async def _ask_triage(
     product: str,
     batch: list[Conversation],
 ) -> dict[int, int]:
-    """One batch of titles to {offset: score}."""
-    titles = "\n".join(
-        f"{i}. [{c.container or '?'}] {(c.title or '(no title)')[:160]}"
-        for i, c in enumerate(batch)
+    """
+    One batch of titles to {offset: score}.
+
+    Asks once for the whole batch, then once more for whatever came back
+    missing. The second ask is cheap - it carries only the titles that were
+    skipped - and it is what separates "the model rejected this" from "the
+    model stopped halfway down the list", which a gap alone cannot say.
+    """
+    scores = await _score_titles(
+        client, template, product, batch, list(range(len(batch)))
     )
-    prompt = template.format(product=product.strip(), titles=titles)
+
+    missing = [i for i in range(len(batch)) if i not in scores]
+    if missing:
+        log.info("triage.incomplete", asked=len(batch), answered=len(scores))
+        scores.update(await _score_titles(client, template, product, batch, missing))
+
+    return scores
+
+
+async def _score_titles(
+    client: httpx.AsyncClient,
+    template: str,
+    product: str,
+    batch: list[Conversation],
+    indices: list[int],
+) -> dict[int, int]:
+    """
+    Score the titles at `indices`, keyed by those same indices.
+
+    The numbering shown to the model is the caller's, not a fresh 0-based run
+    over the subset, so a re-ask cannot come back mapped onto the wrong posts.
+    """
+    if not indices:
+        return {}
+
+    titles = "\n".join(
+        f"{i}. [{batch[i].container or '?'}] {(batch[i].title or '(no title)')[:160]}"
+        for i in indices
+    )
+    prompt = template.format(
+        product=product.strip(), count=len(indices), titles=titles
+    )
 
     response = await client.post(
         CHAT_URL,
@@ -365,6 +432,7 @@ async def _ask_triage(
         )
 
     payload = json.loads(response.json()["choices"][0]["message"]["content"])
+    wanted = set(indices)
     out: dict[int, int] = {}
     for entry in payload.get("scores") or []:
         try:
@@ -372,7 +440,9 @@ async def _ask_triage(
             score = int(entry["s"])
         except (KeyError, TypeError, ValueError):
             continue
-        if 0 <= index < len(batch):
+        # Only what was asked for. A model that invents an index it was never
+        # shown must not get to score a post nobody put in front of it.
+        if index in wanted:
             out[index] = max(0, min(3, score))
     return out
 
