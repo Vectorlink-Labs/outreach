@@ -21,6 +21,7 @@ from outreach.db.models.product import Product
 from outreach.db.models.tracked_post import TrackedPost, TrackState
 from outreach.db.repositories import tracked_posts as repo
 from outreach.profile import Profile
+from outreach.services import reply_check
 
 log = structlog.get_logger(__name__)
 
@@ -167,17 +168,8 @@ async def mark_posted(
     post.posted_at = datetime.now(UTC)
     post.comments_when_posted = thread_comments
     post.our_comment_url = (comment_url or "").strip() or None
-    post.our_comment_id = _comment_id(post.our_comment_url)
+    post.our_comment_id = reply_check.comment_id(post.our_comment_url)
     return post
-
-
-def _comment_id(url: str | None) -> str | None:
-    """The number out of `...#issuecomment-456789`, or None."""
-    if not url or "#" not in url:
-        return None
-    fragment = url.rsplit("#", 1)[-1]
-    digits = fragment.rsplit("-", 1)[-1]
-    return digits if digits.isdigit() else None
 
 
 async def set_outcome(

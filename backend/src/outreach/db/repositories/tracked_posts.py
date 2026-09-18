@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from outreach.db.models.tracked_post import TrackedPost, TrackState
@@ -68,25 +69,42 @@ async def list_for_product(
 
 
 async def open_for_checking(
-    session: AsyncSession, product_id: uuid.UUID, limit: int = 25
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    product_id: uuid.UUID | None = None,
+    *,
+    checked_before: datetime,
+    limit: int = 25,
 ) -> list[TrackedPost]:
     """
     Posts a reply-check could tell us something new about.
 
     Only `posted`: a draft nobody sent cannot have been answered, and a post
-    already marked answered has told us the thing we were waiting for. The
-    limit is a rate-limit cap - re-checks spend from the same thirty requests
-    a minute the search already runs out of.
+    already marked answered has told us the thing we were waiting for. Only
+    those not looked at since `checked_before`, so opening a screen twice
+    does not fetch every thread twice. The limit is a rate-limit cap - every
+    re-check spends from the GitHub allowance the search also needs.
+
+    Scoped by the owning account in the query, one product or all of them.
     """
+    from outreach.db.models.product import Product
+
     stmt = (
         select(TrackedPost)
+        .join(Product, Product.id == TrackedPost.product_id)
         .where(
-            TrackedPost.product_id == product_id,
+            Product.user_id == user_id,
             TrackedPost.state == TrackState.POSTED,
+            or_(
+                TrackedPost.last_checked_at.is_(None),
+                TrackedPost.last_checked_at < checked_before,
+            ),
         )
         .order_by(TrackedPost.last_checked_at.asc().nulls_first())
         .limit(limit)
     )
+    if product_id is not None:
+        stmt = stmt.where(TrackedPost.product_id == product_id)
     return list((await session.execute(stmt)).scalars())
 
 

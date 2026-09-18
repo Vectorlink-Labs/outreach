@@ -21,6 +21,7 @@ export default function ProductTabs({ productId }: Props) {
 
   const plan = `/products/${productId}/plan`;
   const tracking = `/products/${productId}/tracking`;
+  // The latest search. Without `new=1` this never starts one.
   const results = `/opportunities?product=${productId}`;
 
   // Match on the section rather than the exact URL: the results screen

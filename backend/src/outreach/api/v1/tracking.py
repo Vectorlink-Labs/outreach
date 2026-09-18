@@ -14,11 +14,12 @@ import uuid
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 
+from outreach import planner
 from outreach.api.deps import CurrentUser, DbSession
 from outreach.db.models.tracked_post import Outcome
 from outreach.db.repositories import products as product_repo
 from outreach.db.repositories import tracked_posts as repo
-from outreach.services import reply_service
+from outreach.services import reply_check, reply_service
 
 router = APIRouter(tags=["tracking"])
 
@@ -29,7 +30,10 @@ NOT_FOUND = "No tracked post with that id."
 class DraftIn(BaseModel):
     """Everything about the post, taken from the search result on screen."""
 
-    source: str = "github"
+    #: The platform the post is on, as the run named it. Required: this was
+    #: `= "github"`, the frontend never sent it, and every Hacker News reply
+    #: was counted on the GitHub row of the activity page.
+    source: str
     source_id: str = Field(min_length=1, max_length=120)
     url: str = Field(min_length=1, max_length=2048)
     title: str = ""
@@ -65,6 +69,14 @@ async def draft_reply(
     product = await product_repo.get_owned(session, product_id, user.id)
     if product is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No product with that id.")
+
+    # Before the reply is written, which is the part that costs money.
+    if payload.source not in planner.SEARCHABLE:
+        known = ", ".join(sorted(planner.SEARCHABLE))
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Unknown source {payload.source!r}. Expected one of: {known}.",
+        )
 
     try:
         post = await reply_service.draft_for_post(
@@ -110,6 +122,19 @@ async def list_tracking(
         "funnel": counts,
         "posts": [reply_service.as_dict(row) for row in rows],
     }
+
+
+@router.post("/tracking/check-replies")
+async def check_replies(user: CurrentUser, product_id: uuid.UUID | None = None) -> dict:
+    """
+    Look at posted replies' threads again, and mark the answered ones.
+
+    Called by the screens that show the funnel when they open, for one
+    product or the whole account. Cheap to call often: a post is fetched at
+    most once every few minutes however many times this runs. `changed`
+    tells the screen whether its numbers are now out of date.
+    """
+    return await reply_check.check_due(user.id, product_id)
 
 
 class PostedIn(BaseModel):

@@ -20,6 +20,7 @@ import SearchIcon from "@mui/icons-material/Search";
 import { ErrorBlock, Loading } from "@/components/StateBlocks";
 import { platformIcon } from "@/features/plan/platformIcon";
 import { activityApi, type Activity } from "@/lib/activityApi";
+import { trackingApi } from "@/lib/trackingApi";
 import { useSelectedProduct } from "@/lib/selectedProduct";
 import { MONO } from "@/styles/theme";
 
@@ -50,13 +51,27 @@ export default function ActivityRoute() {
     if (!everything && !selected) return;
 
     let cancelled = false;
+    const fetchActivity = () =>
+      activityApi
+        .get(productId)
+        .then((found) => !cancelled && setData(found))
+        .catch((e: unknown) =>
+          !cancelled && setError(e instanceof Error ? e.message : String(e)),
+        );
+
     setData(null);
-    activityApi
-      .get(productId)
-      .then((found) => !cancelled && setData(found))
-      .catch((e: unknown) =>
-        !cancelled && setError(e instanceof Error ? e.message : String(e)),
-      );
+    void fetchActivity();
+
+    // "Answered" only moves when somebody looks at the threads again. Shown
+    // straight away with what is known, then refreshed if the look changed
+    // anything; a failed check leaves the numbers as they were.
+    trackingApi
+      .checkReplies(productId)
+      .then((result) => {
+        if (result.changed > 0) void fetchActivity();
+      })
+      .catch(() => {});
+
     return () => {
       cancelled = true;
     };
@@ -187,7 +202,7 @@ export default function ActivityRoute() {
             component={RouterLink}
             to={
               data.product
-                ? `/opportunities?product=${data.product.id}`
+                ? `/opportunities?product=${data.product.id}&new=1`
                 : "/home"
             }
             variant="contained"

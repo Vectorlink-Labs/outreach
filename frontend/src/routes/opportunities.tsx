@@ -53,9 +53,11 @@ const NO_REPLY_MS = 30_000;
 const TOO_LONG_MS = 6 * 60_000;
 
 export default function OpportunitiesRoute() {
-  const [params] = useSearchParams();
+  const [params, setParams] = useSearchParams();
   const productId = params.get("product") ?? "";
-  const platform = params.get("platform") ?? "github";
+  // Absent means "any platform" when looking, and GitHub when searching.
+  const platformParam = params.get("platform") ?? "";
+  const platform = platformParam || "github";
   /* "|" rather than "," because a repository name never contains one and a
    * search phrase easily might.
    *
@@ -77,13 +79,25 @@ export default function OpportunitiesRoute() {
   const terms = split("terms");
   const repos = split("repos");
 
-  /* Two ways in. `?run=` reopens a search that already happened, which is
-     how the home page links to its last result; anything else starts a new
-     one. Without the distinction, opening yesterday's results would silently
-     spend a fresh run. */
+  /* Three ways in, and only one of them spends anything.
+
+     `?run=` reopens a search that already happened. `?new=1` starts one,
+     and every button that means to search says so. Anything else - the
+     Opportunities tab, a bookmark - shows the product's latest search.
+
+     Starting used to be the default, so everything that reloads a URL
+     spent a fresh run: refresh, Back, a bookmark, the tab, and the Reload
+     button below that promised reloading was safe. Now a missing marker
+     fails safe, and the marker leaves the URL before the search is even
+     requested (see the effect). */
   const existingRunId = params.get("run") ?? "";
+  const startNew = !existingRunId && params.get("new") === "1";
 
   const [run, setRun] = useState<OpportunityRun | null>(null);
+  /* Looked for the latest search and there has never been one. */
+  const [noneYet, setNoneYet] = useState(false);
+  /* This screen spent the run on screen, as opposed to reopening it. */
+  const [startedHere, setStartedHere] = useState(false);
   /* The lead row for each result, keyed by GitHub node id.
    *
    * A run holds what a search found; a lead holds what you did about
@@ -106,17 +120,30 @@ export default function OpportunitiesRoute() {
    * twice in development, and both passes carry the same key. */
   const requestKey = existingRunId
     ? `open:${existingRunId}`
-    : `start:${productId}:${platform}`;
+    : startNew
+      ? `start:${productId}:${platform}`
+      : `latest:${productId}:${platformParam}`;
   const actedOn = useRef("");
+  /* Other URLs that mean the request already in hand. Starting a search
+   * rewrites the address twice - dropping `new=1`, then adding the run id -
+   * and neither rewrite is a new request. */
+  const sameRequest = useRef(new Set<string>());
+  const generation = useRef(0);
   const pollRef = useRef<number | undefined>(undefined);
 
   useEffect(() => {
     if (actedOn.current === requestKey) return;
+    if (sameRequest.current.has(requestKey)) {
+      // Moved on, so that asking for this same search again later counts.
+      actedOn.current = requestKey;
+      return;
+    }
     if (!existingRunId && !productId) return;
     actedOn.current = requestKey;
+    sameRequest.current = new Set();
 
-    /* Staleness is decided by comparing the request, never by a flag the
-     * cleanup sets.
+    /* Staleness is decided by a generation that only a genuinely new
+     * request moves, never by a flag the cleanup sets.
      *
      * A `cancelled` boolean is the obvious way to write this and it is
      * broken here, because React runs effects twice in development. Pass one
@@ -128,12 +155,10 @@ export default function OpportunitiesRoute() {
      * is null, which is why reopening a finished search looked exactly like
      * starting a new one.
      *
-     * Comparing `actedOn` instead makes the double pass harmless: it still
-     * refers to this request, so the answer is kept. Only a genuine change
-     * of query string moves it, and that is the one case where an in-flight
-     * answer really is stale. */
-    const mine = requestKey;
-    const stillMine = () => actedOn.current === mine;
+     * The double pass never gets this far, so it cannot move the generation,
+     * and neither can the URL rewrites above. */
+    const mine = ++generation.current;
+    const stillMine = () => generation.current === mine;
 
     const watch = (runId: string) => {
       window.clearInterval(pollRef.current);
@@ -158,34 +183,59 @@ export default function OpportunitiesRoute() {
 
     setRun(null);
     setError(null);
+    setNoneYet(false);
+    setStartedHere(startNew);
+
+    if (startNew) {
+      /* Out of the address before anything is spent, not after. From here
+       * a refresh, Back or the Reload button lands on the latest search -
+       * and if the backend never answers this request, the latest search is
+       * exactly where the run it did start will turn up. */
+      sameRequest.current.add(`latest:${productId}:${platform}`);
+      setParams({ product: productId, platform }, { replace: true });
+
+      (async () => {
+        try {
+          const runId = await productApi.findOpportunities(
+            productId,
+            platform,
+            terms,
+            repos,
+          );
+          if (!stillMine()) return;
+          // Pinned to this run, so reopening it later shows this search even
+          // after a newer one has run.
+          sameRequest.current.add(`open:${runId}`);
+          setParams({ run: runId, product: productId }, { replace: true });
+          watch(runId);
+        } catch (e) {
+          if (stillMine()) setError(e instanceof Error ? e.message : String(e));
+        }
+      })();
+      return;
+    }
 
     (async () => {
       try {
-        if (existingRunId) {
-          // Reopening. This must never start a search - it is how the home
-          // page links to a result somebody already paid for.
-          const found = await productApi.opportunityRun(existingRunId);
-          if (!stillMine()) return;
-          setRun(found);
-          if (found.state !== "succeeded" && found.state !== "failed") {
-            watch(existingRunId);
-          }
+        // Reopening, or the latest search. Neither may ever start one - this
+        // is how every link reaches a result somebody already paid for.
+        const found = existingRunId
+          ? await productApi.opportunityRun(existingRunId)
+          : await productApi.lastSearch(productId, platformParam || undefined);
+        if (!stillMine()) return;
+        if (!found) {
+          setNoneYet(true);
           return;
         }
-
-        const runId = await productApi.findOpportunities(
-          productId,
-          platform,
-          terms,
-          repos,
-        );
-        if (!stillMine()) return;
-        watch(runId);
+        setRun(found);
+        if (found.state !== "succeeded" && found.state !== "failed") {
+          watch(found.id);
+        }
       } catch (e) {
         if (stillMine()) setError(e instanceof Error ? e.message : String(e));
       }
     })();
-  }, [productId, platform, existingRunId, requestKey]);
+  }, [productId, platform, platformParam, existingRunId, startNew, requestKey]);
 
   // The interval outlives the effect that created it, so it is cleared on
   // unmount rather than between the development double-pass.
@@ -227,7 +277,7 @@ export default function OpportunitiesRoute() {
   // Whether anything is actually working right now. A reopened run that has
   // already finished is not, and showing it the progress card made a saved
   // result look exactly like a search starting from scratch.
-  const live = !run || run.state === "queued" || run.state === "running";
+  const live = !noneYet && (!run || run.state === "queued" || run.state === "running");
 
   // Has it gone quiet for longer than it should have?
   const [waitedMs, setWaitedMs] = useState(0);
@@ -293,7 +343,7 @@ export default function OpportunitiesRoute() {
             {/* Says which search this is. Without it a saved run and a new
                 one are the same screen, and reopening yesterday's results
                 reads as having spent another search. */}
-            {existingRunId && run?.started_at ? (
+            {!startedHere && run?.started_at ? (
               <Stack direction="row" alignItems="center" gap={1} sx={{ mt: 0.5 }}>
                 <HistoryIcon sx={{ fontSize: 16, color: "text.secondary" }} />
                 <Typography variant="body2" color="text.secondary">
@@ -314,7 +364,7 @@ export default function OpportunitiesRoute() {
           {!live && backTo && (
             <Button
               component={RouterLink}
-              to={`/opportunities?product=${backTo}&platform=${shown}`}
+              to={`/opportunities?product=${backTo}&platform=${shown}&new=1`}
               variant="outlined"
               startIcon={<SearchIcon />}
               sx={{ flexShrink: 0 }}
@@ -327,6 +377,15 @@ export default function OpportunitiesRoute() {
 
       {error && <Alert severity="error">{error}</Alert>}
       {run?.error && <Alert severity="error">{run.error}</Alert>}
+
+      {noneYet && (
+        <Alert severity="info">
+          {platformParam
+            ? `Nothing has been searched on ${platformName(platformParam)} for this product yet.`
+            : "Nothing has been searched for this product yet."}{" "}
+          Run a new search to find some.
+        </Alert>
+      )}
 
       {live && !error && (
         <Card variant="outlined">
@@ -405,6 +464,7 @@ export default function OpportunitiesRoute() {
             <OpportunityCard
               key={o.id}
               opportunity={o}
+              source={shown}
               lead={leads[o.id]}
               onLeadChanged={onLeadChanged}
               onReply={setReplyTo}
@@ -432,6 +492,7 @@ export default function OpportunitiesRoute() {
                     <OpportunityCard
                       key={o.id}
                       opportunity={o}
+                      source={shown}
                       lead={leads[o.id]}
                       onLeadChanged={onLeadChanged}
                       onReply={setReplyTo}
@@ -478,11 +539,14 @@ export default function OpportunitiesRoute() {
 
 function OpportunityCard({
   opportunity: o,
+  source,
   lead,
   onLeadChanged,
   onReply,
 }: {
   opportunity: Opportunity;
+  /** The run's platform. A result on its own does not say which site it is from. */
+  source: string;
   lead: Lead | undefined;
   onLeadChanged: (lead: Lead) => void;
   onReply: (post: DraftRequest) => void;
@@ -493,6 +557,7 @@ function OpportunityCard({
      pipeline keeps that. So the quote is the body, which is why the prompt
      is written to cope with a short one. */
   const asDraftRequest = (): DraftRequest => ({
+    source,
     source_id: o.id,
     url: o.url,
     title: o.title,
