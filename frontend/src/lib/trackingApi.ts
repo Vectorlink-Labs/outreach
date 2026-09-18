@@ -55,6 +55,9 @@ export interface TrackingBoard {
 
 /** What the results screen knows about a post when you press Draft a reply. */
 export interface DraftRequest {
+  /** The platform the post is on: the run's `platform`, e.g. "hackernews".
+      Activity counts replies per platform by this. */
+  source: string;
   source_id: string;
   url: string;
   title: string;
@@ -115,8 +118,21 @@ export const trackingApi = {
   async draft(productId: string, post: DraftRequest): Promise<TrackedPost> {
     return request<TrackedPost>(`/products/${productId}/tracking/draft`, {
       method: "POST",
-      body: JSON.stringify({ source: "github", ...post }),
+      body: JSON.stringify(post),
     });
+  },
+
+  /**
+   * Look at posted replies' threads again and mark the answered ones.
+   *
+   * For one product, or the whole account without one. Each post is fetched
+   * at most every few minutes however often this is called, so a screen
+   * can call it every time it opens. `changed` says the numbers on screen
+   * are now out of date.
+   */
+  async checkReplies(productId?: string): Promise<{ checked: number; changed: number }> {
+    const query = productId ? `?product_id=${encodeURIComponent(productId)}` : "";
+    return request(`/tracking/check-replies${query}`, { method: "POST" });
   },
 
   async board(productId: string): Promise<TrackingBoard> {

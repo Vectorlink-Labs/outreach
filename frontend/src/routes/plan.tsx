@@ -125,6 +125,7 @@ export default function PlanRoute() {
       platform: platform.key,
       terms: terms.join("|"),
       repos: repos.join("|"),
+      new: "1",
     });
     navigate(`/opportunities?${params.toString()}`);
   };

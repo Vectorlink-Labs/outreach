@@ -74,9 +74,10 @@ class TrackedPost(TimestampMixin, Base):
     )
 
     # ------------------------------------------------------------ the post
-    #: "github". With `source_id`, the identity - the same pair the
-    #: conversation schema and the de-dup key already use.
-    source: Mapped[str] = mapped_column(String(40), nullable=False, default="github")
+    #: The platform: "github" or "hackernews". With `source_id`, the identity -
+    #: the same pair the conversation schema and the de-dup key already use.
+    #: No default, so a caller that forgets it fails instead of saying GitHub.
+    source: Mapped[str] = mapped_column(String(40), nullable=False)
     source_id: Mapped[str] = mapped_column(String(120), nullable=False)
 
     url: Mapped[str] = mapped_column(String(2048), nullable=False)

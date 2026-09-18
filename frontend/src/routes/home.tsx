@@ -284,7 +284,7 @@ export default function HomeRoute() {
             </Button>
             <Button
               component={RouterLink}
-              to={`/opportunities?product=${productId}&platform=${viewing}`}
+              to={`/opportunities?product=${productId}&platform=${viewing}&new=1`}
               variant="contained"
               startIcon={<SearchIcon />}
               disabled={running}

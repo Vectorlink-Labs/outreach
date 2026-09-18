@@ -101,6 +101,19 @@ export default function TrackingRoute() {
     void load();
   }, [load]);
 
+  /* Answered is the one automatic stage nobody can press a button for: it
+     means going back to each thread and looking. Asked for on opening, and
+     the board reloaded only if the look found something. A failed check is
+     not worth a red box - the board is still right about everything else. */
+  useEffect(() => {
+    trackingApi
+      .checkReplies(productId)
+      .then((result) => {
+        if (result.changed > 0) void load();
+      })
+      .catch(() => {});
+  }, [productId, load]);
+
   const setOutcome = async (post: TrackedPost, outcome: Outcome) => {
     // Optimistic: this is one click on a list of many, and a spinner per row
     // would make recording five outcomes feel like filing a form.
@@ -182,7 +195,7 @@ export default function TrackingRoute() {
             </Typography>
             <Button
               component={RouterLink}
-              to={`/opportunities?product=${productId}`}
+              to={`/opportunities?product=${productId}&new=1`}
               variant="contained"
               startIcon={<SearchIcon />}
             >
